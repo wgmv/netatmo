@@ -1,10 +1,9 @@
 # https://api.met.no/weatherapi/locationforecast/2.0/compact?altitude=353&lat=60.70833400000004&lon=10.611503000000067
 
 import time
+import logging
 import requests
 import utils
-
-import logging
 
 weatherLogger = logging.getLogger(__name__)
 weatherLogger.setLevel(logging.INFO)
