@@ -20,13 +20,13 @@ WHITE = 1
 BLACK = 0
 RED = 2
 
-DEFAULT_FONT_FILE = './free-sans.ttf'
-FALLBACK_FONT_FILE = '../freefont/FreeSans.ttf'
+DEFAULT_FONT_FILE = '../assets/fonts/free-sans.ttf'
+# FALLBACK_FONT_FILE = '../freefont/FreeSans.ttf'
 
-DEFAULT_DATA_FILENAME = 'data/data.json'
-DEFAULT_WEATHER_DATA_FILENAME = 'data/weather_data.json'
-DEFAULT_IMAGE_FILENAME = 'image.bmp'
-DEFAULT_SYMBOLS_DIR = 'symbols'
+DEFAULT_DATA_FILENAME = '../data/data.json'
+DEFAULT_WEATHER_DATA_FILENAME = '../data/weather_data.json'
+DEFAULT_IMAGE_FILENAME = '../image.bmp'
+DEFAULT_SYMBOLS_DIR = '../assets/symbols'
 
 DEFAULT_IMAGE_WIDTH = 960
 DEFAULT_IMAGE_HEIGHT = 540

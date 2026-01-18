@@ -26,13 +26,26 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
 stop_event = threading.Event()
 
 # JSON file names
-CONFIG_FILENAME = "config/config.json"
-TOKEN_FILENAME = "config/token.json"
-DATA_FILENAME = "data/data.json"
+CONFIG_FILENAME = "../config/config.json"
+TOKEN_FILENAME = "../config/token.json"
+DATA_FILENAME = "../data/data.json"
 
 # Default values
-CONFIG_DEFAULT = '{"client_id": "xxxx", "client_secret": "xxxx", "device_id": "xxxx", "refresh_time": 600}, "location": {"longitude": 0.0, "latitude": 0.0, "altitude": 0}}'
-TOKEN_DEFAULT = '{"access_token": "xxxx", "refresh_token": "xxxx"}'
+CONFIG_DEFAULT = {
+    "client_id": "xxxx",
+    "client_secret": "xxxx",
+    "device_id": "xxxx",
+    "refresh_time": 600,
+    "location": {
+        "longitude": 0.0,
+        "latitude": 0.0,
+        "altitude": 0
+    }
+}
+TOKEN_DEFAULT = {
+    "access_token": "xxxx",
+    "refresh_token": "xxxx"
+}
 REFRESH_TIME_DEFAULT = 600   # default 10 minutes
 
 

@@ -9,8 +9,8 @@ weatherLogger = logging.getLogger(__name__)
 weatherLogger.setLevel(logging.INFO)
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
 
-weather_data_filename = "data/weather_data.json"
-config_filename = "config/config.json"
+weather_data_filename = "../data/weather_data.json"
+config_filename = "../config/config.json"
 g_config = dict()
 
 
