@@ -21,7 +21,6 @@ BLACK = 0
 RED = 2
 
 DEFAULT_FONT_FILE = '../assets/fonts/free-sans.ttf'
-# FALLBACK_FONT_FILE = '../freefont/FreeSans.ttf'
 
 DEFAULT_DATA_FILENAME = '../data/data.json'
 DEFAULT_WEATHER_DATA_FILENAME = '../data/weather_data.json'
@@ -94,9 +93,6 @@ class WeatherDisplay:
         
         if os.path.isfile(DEFAULT_FONT_FILE):
             return DEFAULT_FONT_FILE
-        
-        if os.path.isfile(FALLBACK_FONT_FILE):
-            return FALLBACK_FONT_FILE
         
         displayLogger.error("No font file found")
         exit(1)
