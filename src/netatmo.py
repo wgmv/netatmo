@@ -26,9 +26,11 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
 stop_event = threading.Event()
 
 # JSON file names
-CONFIG_FILENAME = "../config/config.json"
-TOKEN_FILENAME = "../config/token.json"
-DATA_FILENAME = "../data/data.json"
+CONFIG_DIR = "../config"
+DATA_DIR = "../data"
+CONFIG_FILENAME = CONFIG_DIR + "/config.json"
+TOKEN_FILENAME = CONFIG_DIR + "/token.json"
+DATA_FILENAME = DATA_DIR + "/data.json"
 
 # Default values
 CONFIG_DEFAULT = {
@@ -142,10 +144,10 @@ class NetatmoService:
     def check_config(self):
         """Check configuration validity"""
         # check directories
-        if not os.path.isdir("config"):
-            os.mkdir("config")
-        if not os.path.isdir("data"):
-            os.mkdir("data")
+        if not os.path.isdir(CONFIG_DIR):
+            os.mkdir(CONFIG_DIR)
+        if not os.path.isdir(DATA_DIR):
+            os.mkdir(DATA_DIR)
 
         # read config
         if os.path.isfile(CONFIG_FILENAME):
