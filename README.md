@@ -22,47 +22,29 @@ NetAtmo weather station display, based on a Raspberry Pi and an e-Paper screen.
 
 # Introduction
 
-The [NetAtmo Smart Weather Station][1] is a nice weather station with an indoor and an outdoor module, and optional rain gauge, anemometer and additional indoor modules. All the data from the different modules is available on the [web portal][2] and on the mobile app.
+The [NetAtmo Smart Weather Station][1] is a weather station with an indoor and an outdoor module, and optional rain gauge, anemometer and additional indoor modules. All the data from the different modules is available on the [web portal][2] and on the mobile app.
 
 [1]: https://www.netatmo.com/en-eu/smart-weather-station
 
 [2]: https://home.netatmo.com/control/dashboard
 
-The modules themselves don't have any kind of display, so this project is an attempt to make a compact dedicated display for the NetAtmo weather station with at least indoor and outdoor temperatures, using a Raspberry Pi and a e-Paper screen.
+The modules themselves don't have any kind of display, so this project is an attempt to make a compact dedicated display for the NetAtmo weather station with at least indoor and outdoor temperatures, using a Raspberry Pi and a e-Paper screen. Credit for the original project: https://github.com/psauliere/netatmo 
 
 The first setup I tried is this one:
 
-- [Raspberry Pi Zero W][3]. The Zero W can be found with a soldered header if soldering is not your thing: it is called a [Raspberry Pi Zero WH][4]. See [here][5] or [here][6].
+- [Raspberry Pi Zero W][3]. The Zero W can be found with a soldered header if soldering is not your thing: it is called a [Raspberry Pi Zero WH][4].
 
-- [PaPiRus ePaper / eInk Screen HAT for Raspberry Pi][7]. I used the 2.7 inch screen, which has a resolution of 264 x 176.
+- [Waveshare 5.83inch e-Paper HAT][10], which has the same size and resolution of 264 x 176 as the PaPiRus.
 
-[3]: https://www.raspberrypi.com/products/raspberry-pi-zero-w/
+[3]: https://www.berrybase.de/raspberry-pi-zero-2-w
 
-[4]: https://www.raspberrypi.org/blog/zero-wh/
+[4]: https://www.berrybase.de/raspberry-pi-zero-2-wh
 
-[5]: https://uk.pi-supply.com/products/raspberry-pi-zero-w-soldered-header
+[10]: https://www.waveshare.com/wiki/5.83inch_e-Paper_HAT_(B)
 
-[6]: https://shop.pimoroni.com/products/raspberry-pi-zero-w
+<!-- ![Waveshare photo](images/waveshare_2in7.jpg "Raspberry Pi 3 B+ and Waveshare 2.7 inch ePaper Hat") -->
 
-[7]: https://uk.pi-supply.com/products/papirus-epaper-eink-screen-hat-for-raspberry-pi
-
-![PaPiRus photo](images/papirus_2in7.jpg "Raspberry Pi Zero W and PaPiRus 2.7inch ePaper HAT")
-
-Then I tried a second setup:
-
-- [Raspberry Pi 3 B+][8] or [Raspberry Pi 4][9].
-
-- [Waveshare 2.7inch e-Paper HAT][10], which has the same size and resolution of 264 x 176 as the PaPiRus.
-
-[8]: https://www.raspberrypi.com/products/raspberry-pi-3-model-b-plus/
-
-[9]: https://www.raspberrypi.com/products/raspberry-pi-4-model-b/
-
-[10]: http://www.waveshare.com/2.7inch-e-paper-hat.htm
-
-![Waveshare photo](images/waveshare_2in7.jpg "Raspberry Pi 3 B+ and Waveshare 2.7 inch ePaper Hat")
-
-The first setup works fine but the PaPiRus screen is not attached to the HAT board, making the thing very fragile without a suitable case. The Waveshare is well attached and the whole setup is much more robust. But on the software side, the PaPiRus has a much better story than the Waveshare. Anyway, both work as expected.
+The Waveshare is well attached and the whole setup is much more robust.
 
 I chose Python 3 for the code as it is available and up to date on every Raspbery Pi OS.
 
@@ -81,14 +63,14 @@ Insert a new microSD card in your PC or Mac (8 GB or more).
 Download, install and run the [Raspberry Pi Imager](https://www.raspberrypi.com/software/) for your OS.
 
 - Under Raspberry Pi Device, choose your target device.
-- Under Operating System, click **Choose OS**, select **Raspberry Pi OS (other)**, and then **Raspberry Pi OS Lite (32 bit)**.
+- Under Operating System, click **Choose OS**, select **Raspberry Pi OS (other)**, and then **Raspberry Pi OS Lite (64 bit)**.
 - Under Storage, choose your microSD card.
 - Click **NEXT**.
 
 Next, you will have the option to use OS custom settings: click **EDIT SETTINGS**.
 
 - At least set the username and password. To make things simple, you can name the user `pi` and choose a password that will be easy to remember.
-- If you plan to use wifi, configure your wifi network.
+- Configure your wifi network. Not that it only connects to 2,4Ghz wifi (not 5Ghz)
 - In the SERVICE tab, check the **Enable SSH** box.
 - Chose if you want to authenticate with the password or a SSH key. If you already have a SSH key, paste your public key.
 - Click **SAVE**.
@@ -137,61 +119,14 @@ sudo apt install git fonts-freefont-ttf python3-pil python3-requests
 
 [17]: https://github.com/psf/requests
 
-<a name="papirus"></a>
-
-## PaPiRus setup
-
-Follow these instructions *only if you have a PaPiRus HAT and e-Paper screen*.
-
-First, the hardware setup. Follow this documentation:
-
-https://www.pi-supply.com/make/papirus-assembly-tips-and-gotchas/
-
-Next, the Python module:
-
-IMPORTANT: On the Raspberry Pi, you need to __enable both SPI and I2C interfaces__ :
-
-```
-sudo raspi-config
-```
-
-Select `Interface options` > `SPI` > `Yes`. Without exiting the tool, still in `Interface options`, select `I2C` > `Yes`.
-
-Reboot:
-
-```
-sudo reboot
-```
-
-Then, follow the instructions here: https://github.com/PiSupply/PaPiRus. Or, here is the short version of these instructions:
-
-```
-sudo apt update
-sudo apt install bc i2c-tools fonts-freefont-ttf whiptail make gcc -y
-sudo apt install python3-pil python3-smbus python3-dateutil -y
-git clone --depth=1 https://github.com/PiSupply/PaPiRus.git
-cd PaPiRus
-sudo python3 setup.py install
-sudo papirus-setup
-sudo papirus-set 2.7
-```
-
-The last command sets the size of the screen you have.
-
-You can then test the Python API with tools present in /usr/local/bin. For instance:
-
-```
-papirus-write "Hello world!"
-papirus-clear
-```
 
 <a name="waveshare"></a>
 
 ## Waveshare Setup
 
-If you have a Waveshare 2.7inch e-Paper screen, the instructions are here:
+If you have a Waveshare screen, for example the 5.83 e-Paper HAT, the instructions are here:
 
-https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT
+https://www.waveshare.com/wiki/5.83inch_e-Paper_HAT_(B)
 
 and the software is here :
 
@@ -267,9 +202,10 @@ This should display a sample based on the sample data included in the repo.
 
 ## NetAtmo API
 
-First you need to get the MAC address of your indoor module. Unfortunately it seems that it is not available any more on the new [dashboard](https://home.netatmo.com/control/dashboard),  So you need to use the mobile app.
+- Create a config directory and run python netatmo.py - it will create config/config.json which needs to be updated with the above data. Same for config/token.json
+First you need to get the device_id of your indoor module. This is the  MAC address of your device. You can get it either from your router or from the mobile app:
 
-On the Android NetAtmo app, you need to tap the menu icon on the top left, then _Manage my home_, and then your indoor module. Look for its _Serial number_ and take note of the value, which begins with `70:ee:50:`.
+On the Android NetAtmo app, you need to tap the menu icon on the top left, then _Manage my home_, and then your indoor module. Look for its _Serial number_ and take note of the value, which begins with `70:ee:50:`. Note that the device_id is case sensitive (here usually all letters lowercase).
 
 Then on your computer, go to https://dev.netatmo.com/apps/, authenticate with your NetAtmo username and password, and create a new app. Take note of the _client id_ and the _client secret_ for your app.
 
@@ -279,16 +215,6 @@ You now need to authorize the app to access your NetAtmo data:
 - It might take a while, and you will get a page where you have to _authorize_ your app to access to your data.
 - Click **Yes I accept**. You now have a new _Access Token_ and a new _Refresh Token_, that you can copy to your clipboard by clicking on them.
 
-Once you have all these values,
-- copy the `sample_config.json` file to a new `config.json` file
-- copy the `sample_token.json` file to a new `token.json` file
-
-```
-cd
-cd netatmo
-cp sample_config.json config.json
-cp sample_token.json token.json
-```
 
 Edit the `config.json` file with your values:
 
@@ -319,9 +245,9 @@ You need these 4 files to begin:
 - `netatmo.py`
 - `display.py` or `custom_display.py`
 
-If `config.json` does not exist, `netatmo.py` creates an empty one and you have to edit it. `config.json` is the configuration file. You must edit this file with your values (see above).
+If `config/config.json` does not exist, `netatmo.py` creates an empty one and you have to edit it. `config.json` is the configuration file. You must edit this file with your values (see above).
 
-If `token.json` does not exist, `netatmo.py` creates an empty one and you have to edit it. `token.json` contains the _access token_ for the program to access to your NetAtmo, and the _refresh token_ for the program to renew the _access token_ when it expires (every 3 hours). This file is written by `netatmo.py` every time it refreshes the _access token_. The refresh operation is managed by the program, but the initial tokens have to be generated and validated interactively online (see above).
+If `config/token.json` does not exist, `netatmo.py` creates an empty one and you have to edit it. `token.json` contains the _access token_ for the program to access to your NetAtmo, and the _refresh token_ for the program to renew the _access token_ when it expires (every 3 hours). This file is written by `netatmo.py` every time it refreshes the _access token_. The refresh operation is managed by the program, but the initial tokens have to be generated and validated interactively online (see above).
 
 `netatmo.py`: main module. Every 10 minutes, it calls the [NetAtmo `getstationdata` API](https://dev.netatmo.com/apidocumentation/weather#getstationsdata) to get the weather station data, stores it to the `data.json` file, and calls `display.py`. It refreshes the access token when it expires.
 
