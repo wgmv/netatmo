@@ -1,16 +1,24 @@
 # https://api.met.no/weatherapi/locationforecast/2.0/compact?altitude=353&lat=60.70833400000004&lon=10.611503000000067
 
 import time
+import os
 import logging
 import requests
 import utils
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Parent directory (project root)
+
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+DATA_DIR = os.path.join(BASE_DIR, "data")
 
 weatherLogger = logging.getLogger(__name__)
 weatherLogger.setLevel(logging.INFO)
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
 
-weather_data_filename = "../data/weather_data.json"
-config_filename = "../config/config.json"
+weather_data_filename = os.path.join(DATA_DIR, "weather_data.json")
+config_filename = os.path.join(CONFIG_DIR, "config.json")
 g_config = dict()
 
 

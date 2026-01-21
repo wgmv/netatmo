@@ -25,12 +25,16 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
 
 stop_event = threading.Event()
 
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Parent directory (project root)
+
 # JSON file names
-CONFIG_DIR = "../config"
-DATA_DIR = "../data"
-CONFIG_FILENAME = CONFIG_DIR + "/config.json"
-TOKEN_FILENAME = CONFIG_DIR + "/token.json"
-DATA_FILENAME = DATA_DIR + "/data.json"
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+DATA_DIR = os.path.join(BASE_DIR, "data")
+CONFIG_FILENAME = os.path.join(CONFIG_DIR, "config.json")
+TOKEN_FILENAME = os.path.join(CONFIG_DIR, "token.json")
+DATA_FILENAME = os.path.join(DATA_DIR, "data.json")
 
 # Default values
 CONFIG_DEFAULT = {

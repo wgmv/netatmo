@@ -15,17 +15,21 @@ from PIL import ImageFont
 
 import utils
 
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Parent directory (project root)
+
 # Constants
 WHITE = 1
 BLACK = 0
 RED = 2
 
-DEFAULT_FONT_FILE = '../assets/fonts/free-sans.ttf'
+DEFAULT_FONT_FILE = os.path.join(BASE_DIR, 'assets', 'fonts', 'free-sans.ttf')
 
-DEFAULT_DATA_FILENAME = '../data/data.json'
-DEFAULT_WEATHER_DATA_FILENAME = '../data/weather_data.json'
-DEFAULT_IMAGE_FILENAME = '../image.bmp'
-DEFAULT_SYMBOLS_DIR = '../assets/symbols'
+DEFAULT_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'data.json')
+DEFAULT_WEATHER_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'weather_data.json')
+DEFAULT_IMAGE_FILENAME = os.path.join(BASE_DIR, 'image.bmp')
+DEFAULT_SYMBOLS_DIR = os.path.join(BASE_DIR, 'assets', 'symbols')
 
 DEFAULT_IMAGE_WIDTH = 960
 DEFAULT_IMAGE_HEIGHT = 540
@@ -47,7 +51,6 @@ class WeatherDisplay:
                  weather_data_filename=DEFAULT_WEATHER_DATA_FILENAME,
                  image_filename=DEFAULT_IMAGE_FILENAME,
                  symbols_dir=DEFAULT_SYMBOLS_DIR,
-                 font_file=None,
                  image_width=DEFAULT_IMAGE_WIDTH,
                  image_height=DEFAULT_IMAGE_HEIGHT):
         """Initialize the WeatherDisplay
@@ -57,7 +60,6 @@ class WeatherDisplay:
             weather_data_filename: Path to weather forecast JSON file
             image_filename: Output image filename
             symbols_dir: Directory containing weather symbol images
-            font_file: Path to TrueType font file (auto-detected if None)
             image_width: Width of output image in pixels
             image_height: Height of output image in pixels
         """
@@ -67,35 +69,29 @@ class WeatherDisplay:
         self.symbols_dir = symbols_dir
         self.image_width = image_width
         self.image_height = image_height
-        
-        # Find font file
-        self.font_file = self._find_font_file(font_file)
+
+        #Check/create symbols directory
+        if not os.path.isfile(data_filename):
+            displayLogger.error("No data file found: %s", data_filename)
+            exit(1)
+
+        if not os.path.isfile(weather_data_filename):
+            displayLogger.error("No forecast data file found: %s", weather_data_filename)
+            exit(1)
+
+        if not os.path.isfile(image_filename):
+            displayLogger.error("No image file found: %s", image_filename)
+            exit(1)
+
+        if not os.path.isfile(DEFAULT_FONT_FILE):
+            displayLogger.error("No font file found: %s", DEFAULT_FONT_FILE)
+            exit(1)
         
         # Data storage
         self.data = {}
         self.weather_data = {}
         self.image = None
     
-    def _find_font_file(self, font_file):
-        """Find a valid font file
-        
-        Args:
-            font_file: User-provided font file path
-            
-        Returns:
-            Valid font file path
-            
-        Raises:
-            SystemExit: If no valid font file found
-        """
-        if font_file and os.path.isfile(font_file):
-            return font_file
-        
-        if os.path.isfile(DEFAULT_FONT_FILE):
-            return DEFAULT_FONT_FILE
-        
-        displayLogger.error("No font file found")
-        exit(1)
     
     @staticmethod
     def trend_symbol(trend):
@@ -157,9 +153,9 @@ class WeatherDisplay:
         width, height = self.image.size
 
         # Load fonts
-        font_text = ImageFont.truetype(self.font_file, FONT_SIZE_TEXT)
-        font_temp = ImageFont.truetype(self.font_file, FONT_SIZE_TEMP)
-        font_time = ImageFont.truetype(self.font_file, FONT_SIZE_TIME)
+        font_text = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TEXT)
+        font_temp = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TEMP)
+        font_time = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TIME)
 
         # Get units from user settings
         user_admin = self.data["body"]["user"]["administrative"]
