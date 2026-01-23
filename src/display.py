@@ -2,12 +2,14 @@
 """display.py
 Displays NetAtmo weather station data on a local screen
 input: data.json file, result of NetAtmo getstationsdata API
-screen: PaPiRus ePaper / eInk Screen HAT for Raspberry Pi - 2.7"
+screen: Waveshare ePaper / eInk Screen HAT for Raspberry Pi
 output: copy of the screen in file: image.bmp
 """
 
 import os
-import logging
+import logging 
+import sys
+import importlib
 
 from PIL import Image
 from PIL import ImageDraw
@@ -52,7 +54,8 @@ class WeatherDisplay:
                  image_filename=DEFAULT_IMAGE_FILENAME,
                  symbols_dir=DEFAULT_SYMBOLS_DIR,
                  image_width=DEFAULT_IMAGE_WIDTH,
-                 image_height=DEFAULT_IMAGE_HEIGHT):
+                 image_height=DEFAULT_IMAGE_HEIGHT,
+                 screen_type=None):
         """Initialize the WeatherDisplay
         
         Args:
@@ -62,6 +65,7 @@ class WeatherDisplay:
             symbols_dir: Directory containing weather symbol images
             image_width: Width of output image in pixels
             image_height: Height of output image in pixels
+            screen_type: Screen type ('epd2in7', 'epd5in83', None for file only)
         """
         self.data_filename = data_filename
         self.weather_data_filename = weather_data_filename
@@ -69,6 +73,8 @@ class WeatherDisplay:
         self.symbols_dir = symbols_dir
         self.image_width = image_width
         self.image_height = image_height
+        self.screen_type = screen_type
+        self.epd = None
 
         #Check/create symbols directory
         if not os.path.isfile(data_filename):
@@ -77,10 +83,6 @@ class WeatherDisplay:
 
         if not os.path.isfile(weather_data_filename):
             displayLogger.error("No forecast data file found: %s", weather_data_filename)
-            exit(1)
-
-        if not os.path.isfile(image_filename):
-            displayLogger.error("No image file found: %s", image_filename)
             exit(1)
 
         if not os.path.isfile(DEFAULT_FONT_FILE):
@@ -378,11 +380,57 @@ class WeatherDisplay:
             humidity = Image.open(humidity_path)
             self.image.paste(humidity, (600, 225), mask=humidity)
     
+    def _init_screen(self):
+        """Initialize the e-paper display based on screen_type
+        
+        Returns:
+            tuple: (width, height) for the screen, or None if file-only mode
+        """
+        if self.screen_type is None:
+            return None
+        
+        try:
+            libdir = os.path.realpath(os.getenv('HOME', '.') + '/e-Paper/RaspberryPi_JetsonNano/python/lib')
+            if libdir not in sys.path:
+                sys.path.append(libdir)
+            
+            # Import the module dynamically based on screen_type
+            module = importlib.import_module(f'waveshare_epd.{self.screen_type}')
+            epd = module.EPD()
+            epd.init()
+            self.epd = epd
+            return (epd.height, epd.width)
+        
+        except Exception as e:
+            displayLogger.error(f"Failed to initialize {self.screen_type}: {e}", exc_info=True)
+            return None
+    
+    def _display_on_screen(self):
+        """Display the image on the physical e-paper screen"""
+        if self.epd is None:
+            return
+        
+        try:
+            # All waveshare displays use the same method
+            self.epd.display(self.epd.getbuffer(self.image))
+            self.epd.sleep()
+            
+            displayLogger.info(f"Image displayed on {self.screen_type}")
+        
+        except Exception as e:
+            displayLogger.error(f"Failed to display on {self.screen_type}: {e}", exc_info=True)
+    
     def generate(self):
         """Generate the complete weather display image
         
         This is the main method to create and save the display
         """
+        # Initialize screen if specified
+        screen_size = self._init_screen()
+        if screen_size:
+            self.image_width, self.image_height = screen_size
+            displayLogger.info(f"Using screen {self.screen_type} with size {screen_size}")
+        
         # Create blank image
         self.image = Image.new('1', (self.image_width, self.image_height), WHITE)
         
@@ -395,11 +443,26 @@ class WeatherDisplay:
         # Save the result
         self.image.save(self.image_filename)
         displayLogger.info("Image saved to %s", self.image_filename)
+        
+        # Display on physical screen if available
+        if self.epd is not None:
+            self._display_on_screen()
 
 
 def main():
     """Main function"""
-    display = WeatherDisplay()
+    # Try to read screen_type from config
+    config_file = os.path.join(BASE_DIR, 'config', 'config.json')
+    screen_type = None
+    
+    if os.path.isfile(config_file):
+        try:
+            config = utils.read_json(config_file)
+            screen_type = config.get('screen_type', None)
+        except Exception as e:
+            displayLogger.warning(f"Could not read screen_type from config: {e}")
+    
+    display = WeatherDisplay(screen_type=screen_type)
     display.generate()
 
 
@@ -410,8 +473,16 @@ if __name__ == '__main__':
 """
 Usage Examples:
 
-# Basic usage with defaults:
+# Basic usage with defaults (file-only mode):
 display = WeatherDisplay()
+display.generate()
+
+# With Waveshare 2.7" e-paper display:
+display = WeatherDisplay(screen_type='epd2in7')
+display.generate()
+
+# With Waveshare 5.83" e-paper display:
+display = WeatherDisplay(screen_type='epd5in83')
 display.generate()
 
 # Custom configuration:
@@ -420,17 +491,21 @@ display = WeatherDisplay(
     weather_data_filename='custom/weather.json',
     image_filename='my_display.bmp',
     symbols_dir='custom_symbols',
-    font_file='/path/to/custom_font.ttf',
     image_width=1200,
-    image_height=600
+    image_height=600,
+    screen_type='epd5in83'
 )
 display.generate()
 
-# Step-by-step generation:
-display = WeatherDisplay()
-display.image = Image.new('1', (display.image_width, display.image_height), WHITE)
-display.draw_image()
-display.add_humidity_icon()
-# Add custom elements here...
-display.save()
+# Configure via config.json by adding "screen_type" field:
+# {
+#   "client_id": "...",
+#   "screen_type": "epd2in7"  // Options: "epd2in7", "epd5in83", or null
+# }
+
+# Supported screen_type values:
+# - None or null: File-only mode (default)
+# - 'epd2in7': Waveshare 2.7" e-paper HAT
+# - 'epd5in83': Waveshare 5.83" e-paper HAT
 """
+
