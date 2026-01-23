@@ -103,14 +103,12 @@ class WeatherDisplay:
         Returns:
             Unicode arrow character
         """
-        if trend == 'up':
-            return '\u2197' # '↗' U+2197
-        elif trend == 'down':
-            return '\u2198' # '↘' U+2198
-        elif trend == 'stable':
-            return '\u2192' # '→' U+2192
-        else:
-            return ' '
+        trends = {
+            'up': '\u2197',     # ↗
+            'down': '\u2198',   # ↘
+            'stable': '\u2192'  # →
+        }
+        return trends.get(trend, ' ')
     
     def _load_data(self):
         """Load data from JSON files
@@ -159,18 +157,21 @@ class WeatherDisplay:
 
         # Get units from user settings
         user_admin = self.data["body"]["user"]["administrative"]
-        battery_percent = 'Bateria: ' + str(self.data['body']['devices'][0]['modules'][0]['battery_percent']) + ' |' 
         unit_temp = ['°C', '°F'][user_admin["unit"]]
         unit_rain = ['mm/h', 'in/h'][user_admin["unit"]]
         unit_wind = ['kph', 'mph', 'm/s', 'beaufort', 'knot'][user_admin["windunit"]]
         unit_humidity = '%'
         unit_co2 = 'ppm'
 
+        # Battery percentage
+        battery = self.data['body']['devices'][0]['modules'][0]['battery_percent']
+        battery_percent = f'Bateria: {battery} |'
+
         # Extract and format sensor values
         indoor_temp_str, indoor_humidity_str, indoor_co2_str = self._get_indoor_data(unit_temp, unit_humidity, unit_co2)
         outdoor_temp_str, outdoor_humidity_str, rain_str, wind_str = self._get_outdoor_data(unit_temp, unit_humidity, unit_rain, unit_wind)
         
-        data_time_str = "Aktualizowano  : " + utils.timestr(self.data["time_server"])
+        data_time_str = f"Aktualizowano  : {utils.timestr(self.data['time_server'])}"
         
         # Get weather forecast data
         forecast_data = self._get_forecast_data()
@@ -187,23 +188,22 @@ class WeatherDisplay:
         txtheight = height_indoor
 
         # Calculate window positions
-        first_window_x = int(width/8)
-        first_window_y = int(height/8)
-        second_window_x = int((width/2)+width/6)
-        second_window_y = int(height/8)
-        bottom_window_x = int(10)
-        bottom_window_y = int(height/2+150)
+        left_x = width // 8
+        right_x = width // 2 + width // 6
+        top_y = height // 8
+        bottom_x = 10
+        bottom_y = height // 2 + 150
 
         # Draw layout structure
         self._draw_layout(draw, width, height)
 
         # Draw temperatures
-        draw.text((first_window_x, first_window_y), indoor_temp_str, fill=BLACK, font=font_temp)
-        draw.text((second_window_x, second_window_y), outdoor_temp_str, fill=BLACK, font=font_temp)
+        draw.text((left_x, top_y), indoor_temp_str, fill=BLACK, font=font_temp)
+        draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
 
         # Draw indoor humidity and CO2
-        draw.text((second_window_x, second_window_y + (4*txtheight)), 
-                  indoor_humidity_str + " / " + indoor_co2_str, fill=BLACK, font=font_text)
+        draw.text((right_x, top_y + (4 * txtheight)), 
+                  f"{indoor_humidity_str} / {indoor_co2_str}", fill=BLACK, font=font_text)
 
         # Draw time and battery
         draw.text((width - width_time - 5, 5), data_time_str, fill=BLACK, font=font_time)
@@ -211,7 +211,7 @@ class WeatherDisplay:
 
         # Draw weather forecast
         if forecast_data:
-            self._draw_forecast(forecast_data, bottom_window_x, bottom_window_y, width, unit_temp, font_text)
+            self._draw_forecast(forecast_data, bottom_x, bottom_y, width, unit_temp, font_text)
     
     def _get_indoor_data(self, unit_temp, unit_humidity, unit_co2):
         """Extract indoor sensor data
@@ -230,14 +230,20 @@ class WeatherDisplay:
         
         device = self.data["body"]["devices"][0]
         if "dashboard_data" in device:
-            indoor_data = device["dashboard_data"]
-            indoor_temp_str = '{0:.1f}'.format(indoor_data["Temperature"]) + " " + unit_temp
-            indoor_humidity_str = '{0:.1f}'.format(indoor_data["Humidity"]) + " " + unit_humidity
-            if "temp_trend" in indoor_data:
-                indoor_temp_str += self.trend_symbol(indoor_data["temp_trend"])
-            indoor_co2_str = '{0:.1f}'.format(indoor_data["CO2"]) + " " + unit_co2
-            if "pressure_trend" in indoor_data:
-                indoor_co2_str += self.trend_symbol(indoor_data["pressure_trend"])
+            data = device["dashboard_data"]
+            temp = data["Temperature"]
+            humidity = data["Humidity"]
+            co2 = data["CO2"]
+            
+            indoor_temp_str = f"{temp:.1f} {unit_temp}"
+            if "temp_trend" in data:
+                indoor_temp_str += self.trend_symbol(data["temp_trend"])
+            
+            indoor_humidity_str = f"{humidity:.1f} {unit_humidity}"
+            
+            indoor_co2_str = f"{co2:.1f} {unit_co2}"
+            if "pressure_trend" in data:
+                indoor_co2_str += self.trend_symbol(data["pressure_trend"])
         
         return indoor_temp_str, indoor_humidity_str, indoor_co2_str
     
@@ -260,24 +266,27 @@ class WeatherDisplay:
         
         device = self.data["body"]["devices"][0]
         for module in device["modules"]:
-            if "dashboard_data" in module:
-                module_type = module["type"]
-                module_data = module["dashboard_data"]
-                if module_type == "NAModule1":
-                    # Outdoor Module
-                    outdoor_temp_str = '{0:.1f}'.format(module_data["Temperature"]) + " " + unit_temp
-                    outdoor_humidity_str = '{0:.1f}'.format(module_data["Humidity"]) + " " + unit_humidity
-                    if "temp_trend" in module_data:
-                        outdoor_temp_str += self.trend_symbol(module_data["temp_trend"])
-                elif module_type == "NAModule2":
-                    # Wind Gauge
-                    wind_str = '{0:.1f}'.format(module_data.get("WindStrength", 0)) + " " + unit_wind
-                elif module_type == "NAModule3":
-                    # Rain Gauge
-                    rain_str = '{0:.1f}'.format(module_data.get("sum_rain_24", 0)) + " mm"
-                elif module_type == "NAModule4":
-                    # Optional indoor module
-                    pass
+            if "dashboard_data" not in module:
+                continue
+                
+            module_type = module["type"]
+            data = module["dashboard_data"]
+            
+            if module_type == "NAModule1":  # Outdoor Module
+                temp = data["Temperature"]
+                humidity = data["Humidity"]
+                outdoor_temp_str = f"{temp:.1f} {unit_temp}"
+                if "temp_trend" in data:
+                    outdoor_temp_str += self.trend_symbol(data["temp_trend"])
+                outdoor_humidity_str = f"{humidity:.1f} {unit_humidity}"
+                
+            elif module_type == "NAModule2":  # Wind Gauge
+                wind = data.get("WindStrength", 0)
+                wind_str = f"{wind:.1f} {unit_wind}"
+                
+            elif module_type == "NAModule3":  # Rain Gauge
+                rain = data.get("sum_rain_24", 0)
+                rain_str = f"{rain:.1f} mm"
         
         return outdoor_temp_str, outdoor_humidity_str, rain_str, wind_str
     
@@ -319,13 +328,15 @@ class WeatherDisplay:
         draw.rectangle((2, 2, width - 2, height - 2), fill=WHITE, outline=BLACK)
         
         # Main dividing lines
-        draw.line((width/2, 2, width/2, height/2), fill=BLACK, width=2)
-        draw.line((2, height/2, width-2, height/2), fill=BLACK, width=2)
+        mid_x = width // 2
+        mid_y = height // 2
+        draw.line((mid_x, 2, mid_x, mid_y), fill=BLACK, width=2)
+        draw.line((2, mid_y, width - 2, mid_y), fill=BLACK, width=2)
 
-        # Bottom window divisions
+        # Bottom window divisions (5 equal sections)
         for i in range(1, 5):
-            x = i * width / 4
-            draw.line((x, height/2, x, height-2), fill=BLACK, width=2)
+            x = i * width // 4
+            draw.line((x, mid_y, x, height - 2), fill=BLACK, width=2)
     
     def _draw_forecast(self, forecast_data, bottom_window_x, bottom_window_y, width, unit_temp, font_text):
         """Draw weather forecast section
@@ -342,21 +353,22 @@ class WeatherDisplay:
         
         for i, forecast in enumerate(forecast_data):
             # Load and resize weather symbol
-            symbol_path = os.path.join(self.symbols_dir, forecast['symbol_code'] + ".png")
+            symbol_file = f"{forecast['symbol_code']}.png"
+            symbol_path = os.path.join(self.symbols_dir, symbol_file)
+            
             if os.path.isfile(symbol_path):
-                weather_symbol = Image.open(symbol_path)
-                weather_symbol = weather_symbol.resize(WEATHER_SYMBOL_SIZE)
-                
-                # Calculate position
-                x_pos = 60 + i * 240
-                self.image.paste(weather_symbol, (x_pos, 300), mask=weather_symbol)
+                symbol = Image.open(symbol_path).resize(WEATHER_SYMBOL_SIZE)
+                x_symbol = 60 + i * 240
+                self.image.paste(symbol, (x_symbol, 300), mask=symbol)
             
             # Draw time and temperature
-            x_text = bottom_window_x + i * (width / 4)
-            draw.text((x_text, bottom_window_y), utils.format_time_str(forecast['time']), 
-                     fill=BLACK, font=font_text)
-            temp_str = '{0:.1f}'.format(forecast['temp_min']) + unit_temp + " / " + \
-                      '{0:.1f}'.format(forecast['temp_max']) + unit_temp
+            x_text = bottom_window_x + i * (width // 4)
+            time_str = utils.format_time_str(forecast['time'])
+            draw.text((x_text, bottom_window_y), time_str, fill=BLACK, font=font_text)
+            
+            temp_min = forecast['temp_min']
+            temp_max = forecast['temp_max']
+            temp_str = f"{temp_min:.1f}{unit_temp} / {temp_max:.1f}{unit_temp}"
             draw.text((x_text, bottom_window_y + 30), temp_str, fill=BLACK, font=font_text)
     
     def add_humidity_icon(self):
@@ -365,12 +377,6 @@ class WeatherDisplay:
         if os.path.isfile(humidity_path):
             humidity = Image.open(humidity_path)
             self.image.paste(humidity, (600, 225), mask=humidity)
-    
-    def save(self):
-        """Save the image to file"""
-        if self.image:
-            self.image.save(self.image_filename)
-            displayLogger.info("Image saved to %s", self.image_filename)
     
     def generate(self):
         """Generate the complete weather display image
@@ -387,7 +393,8 @@ class WeatherDisplay:
         # self.add_humidity_icon()
         
         # Save the result
-        self.save()
+        self.image.save(self.image_filename)
+        displayLogger.info("Image saved to %s", self.image_filename)
 
 
 def main():
