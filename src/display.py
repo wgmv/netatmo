@@ -7,9 +7,10 @@ output: copy of the screen in file: image.bmp
 """
 
 import os
-import logging 
+import logging
 import sys
 import importlib
+from datetime import datetime, timedelta
 
 from PIL import Image
 from PIL import ImageDraw
@@ -302,19 +303,61 @@ class WeatherDisplay:
             return None
         
         timeseries = self.weather_data["properties"]["timeseries"]
-        if len(timeseries) <= 23:
+        if len(timeseries) < 10:
             return None
         
         forecast_data = []
-        for index in [0, 5, 11, 17, 23]:
-            forecast = timeseries[index]
-            forecast_details = forecast["data"]["next_6_hours"]["details"]
-            forecast_data.append({
-                'time': forecast["time"],
-                'symbol_code': forecast["data"]["next_6_hours"]["summary"]["symbol_code"],
-                'temp_min': forecast_details["air_temperature_min"],
-                'temp_max': forecast_details["air_temperature_max"]
-            })
+        now = datetime.now().astimezone()  # Get current time in local timezone
+
+        # Determine target times based on current hour
+        target_times = []
+        
+        if now.hour >= 0 and now.hour < 5:
+            # After midnight: use fixed times for today and tomorrow
+            today = now.replace(hour=5, minute=0, second=0, microsecond=0)
+            target_times.append(today)  # Today 5 AM
+            target_times.append(today.replace(hour=8))  # Today 8 AM
+            tomorrow = today + timedelta(days=1)
+            target_times.append(tomorrow)  # Tomorrow 5 AM
+            target_times.append(tomorrow.replace(hour=8))  # Tomorrow 8 AM
+        else:
+            # During the day: use relative times + tomorrow fixed times
+            target_times.append(now + timedelta(hours=3))  # 3 hours from now
+            target_times.append(now + timedelta(hours=6))  # 6 hours from now
+            tomorrow = (now + timedelta(days=1)).replace(hour=5, minute=0, second=0, microsecond=0)
+            target_times.append(tomorrow)  # Tomorrow 5 AM
+            target_times.append(tomorrow.replace(hour=8))  # Tomorrow 8 AM
+        
+        # Find closest matching forecasts
+        for target_time in target_times:
+            closest_forecast = None
+            min_diff = timedelta(hours=999)
+            
+            for forecast in timeseries:
+                forecast_time = datetime.fromisoformat(forecast["time"].replace('Z', '+00:00'))
+                diff = abs(forecast_time - target_time)
+                
+                if diff < min_diff:
+                    min_diff = diff
+                    closest_forecast = forecast
+            
+            if closest_forecast and "next_6_hours" in closest_forecast["data"]:
+                forecast_details = closest_forecast["data"]["next_6_hours"]["details"]
+                forecast_data.append({
+                    'time': closest_forecast["time"],
+                    'symbol_code': closest_forecast["data"]["next_6_hours"]["summary"]["symbol_code"],
+                    'temp_min': forecast_details["air_temperature_min"],
+                    'temp_max': forecast_details["air_temperature_max"]
+                })
+            elif closest_forecast and "next_1_hours" in closest_forecast["data"]:
+                # Fallback to next_1_hours if next_6_hours not available
+                instant_details = closest_forecast["data"]["instant"]["details"]
+                forecast_data.append({
+                    'time': closest_forecast["time"],
+                    'symbol_code': closest_forecast["data"]["next_1_hours"]["summary"]["symbol_code"],
+                    'temp_min': instant_details["air_temperature"],
+                    'temp_max': instant_details["air_temperature"]
+                })
         
         return forecast_data
     

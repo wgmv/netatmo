@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """netatmo.py
 NetAtmo weather station display
-Every 10 minutes, gets the weather station data to a
-local data.json file, and calls display.py.
+Periodically fetches weather station data and updates the display.
 """
 
 import logging
 import os
 import sys
-import threading
 import time
 
 import requests
@@ -22,8 +20,6 @@ import weather
 netatmoLogger = logging.getLogger(__name__)
 netatmoLogger.setLevel(logging.INFO)
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
-
-stop_event = threading.Event()
 
 # Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -63,7 +59,10 @@ class NetatmoService:
         self.token = {}
         self.data = {}
         self.reader = reader.DataReader(DATA_FILENAME)
+        self.console_formatter = formatters.NetatmoConsoleFormatter()
         self.weather_service = weather.WeatherServiceMetNo()
+        self.last_weather_fetch = 0
+        self.weather_interval = 3600  # Fetch weather every 60 minutes
 
     def get_new_token_info(self):
         """Instruct the user to authenticate on the dev portal and get a new token."""
@@ -206,48 +205,46 @@ class NetatmoService:
                     self.config['location']['latitude']
                 )
 
-    def start(self):
-        """Main function"""
+    def run(self):
+        """Main loop - fetches data and updates display periodically"""
         self.check_config()
 
-        print("Starting NetAtmo service...")
-        print(self.config['refresh_time'], "seconds refresh time.")
-
-        data_reader = reader.DataReader(DATA_FILENAME)
-        console_formatter = formatters.NetatmoConsoleFormatter()
+        netatmoLogger.info("Starting NetAtmo service with %d seconds refresh time.", self.config['refresh_time'])
         
-        # read last data
-        if data_reader.exists():
-            self.data = self.reader.read()
-        
-        formatted = data_reader.display(console_formatter)
-        
-        # Start weather service in background thread
-        self.weather_service.start()
-       
         try:
-            while not stop_event.is_set():
-                self.get_station_data()
+            while True:
+                try:
+                    # Fetch station data
+                    netatmoLogger.info("Fetching new station data.")
+                    self.get_station_data()
 
-                if formatted:
-                    netatmoLogger.info(formatted)
-            
-                display.main()
-
-                # sleep in small chunks so shutdown is responsive
-                for _ in range(self.config['refresh_time']):
-                    if stop_event.is_set():
-                        break
-                    time.sleep(1)
-        finally:
-            # Stop weather service on exit
-            self.weather_service.stop()
-            # sleep in small chunks so shutdown is responsive
-            for _ in range(self.config['refresh_time']):
-                if stop_event.is_set():
-                    break
-                time.sleep(1)
+                    # Read and display station data
+                    if self.reader.exists():
+                        self.data = self.reader.read()
+                        formatted = self.reader.display(self.console_formatter)
+                        if formatted:
+                            netatmoLogger.info(formatted)
+                    
+                    # Fetch weather data if needed (every 60 minutes)
+                    current_time = time.time()
+                    if current_time - self.last_weather_fetch >= self.weather_interval:
+                        netatmoLogger.info("Fetching new weather data.")
+                        self.weather_service.get_weather_data()
+                        self.last_weather_fetch = current_time
+                    
+                    # Update display
+                    display.main()
+                    
+                except Exception as e:
+                    netatmoLogger.error("Error in main loop: %s", e, exc_info=True)
+                
+                # Sleep before next iteration
+                netatmoLogger.info("Sleeping for %d seconds...", self.config['refresh_time'])
+                time.sleep(self.config['refresh_time'])
+                
+        except KeyboardInterrupt:
+            netatmoLogger.info("Shutting down gracefully...")
 
 if __name__ == '__main__':
     service = NetatmoService()
-    service.start()
+    service.run()
