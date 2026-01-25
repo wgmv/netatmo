@@ -16,7 +16,7 @@ echo "Launching tmux"
 tmux has-session -t $SESSION 2>/dev/null && tmux kill-session -t $SESSION
 
 # Create new detached session
-tmux new-session -d -s $SESSION "python3 /home/wav/netatmo/src/netatmo.py"
+tmux new-session -d -s $SESSION "python3 ~/netatmo/src/netatmo.py"
 
 # Verify session was created
 if tmux has-session -t $SESSION 2>/dev/null; then
