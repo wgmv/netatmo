@@ -228,7 +228,7 @@ class WeatherDisplay:
         # Calculate window positions
         left_x = width // 8
         right_x = width // 2 + width // 6
-        top_y = height // 8
+        top_y = height // 6
         bottom_x = 10
         bottom_y = height // 2 + 150
 
@@ -236,10 +236,10 @@ class WeatherDisplay:
         self._draw_layout(draw, width, height)
 
         # Draw indoor data
-        self._draw_indoor_data(indoor_data, left_x, right_x, top_y, font_text, font_temp)
+        self._draw_indoor_data(indoor_data, left_x, top_y, font_text, font_temp)
         
         # Draw outdoor data
-        self._draw_outdoor_data(outdoor_data, right_x, top_y, font_temp)
+        self._draw_outdoor_data(outdoor_data, right_x, top_y, font_text, font_temp)
         
         # Draw time and battery
         battery = self.data['body']['devices'][0]['modules'][0]['battery_percent']
@@ -274,7 +274,7 @@ class WeatherDisplay:
             'pressure_trend': data.get("pressure_trend")
         }
     
-    def _draw_indoor_data(self, indoor_data, left_x, right_x, top_y, font_text, font_temp):
+    def _draw_indoor_data(self, indoor_data, left_x, top_y, font_text, font_temp):
         """Draw indoor sensor data on the display
         
         Args:
@@ -319,8 +319,9 @@ class WeatherDisplay:
         (width_temp, height_temp) = utils.textsize(indoor_temp_str, font=font_temp)
         
         # Draw humidity and CO2
-        draw.text((right_x, top_y + (4 * height_temp)), 
-                  f"{indoor_humidity_str} / {indoor_co2_str}", fill=BLACK, font=font_text)
+        self._draw_weather_symbol('humidity', left_x - 12, top_y + (3 * height_temp) + 50, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 50, symbol_size=(30, 30))
+        draw.text((left_x, top_y + (3 * height_temp)+20), 
+                  f" {indoor_humidity_str} / CO₂: {indoor_co2_str}", fill=BLACK, font=font_text)
         
     
     def _get_outdoor_data(self):
@@ -358,7 +359,7 @@ class WeatherDisplay:
         
         return outdoor_data
     
-    def _draw_outdoor_data(self, outdoor_data, right_x, top_y, font_temp):
+    def _draw_outdoor_data(self, outdoor_data, right_x, top_y, font_text, font_temp):
         """Draw outdoor sensor data on the display
         
         Args:
@@ -379,9 +380,24 @@ class WeatherDisplay:
                 outdoor_temp_str += TREND_SYMBOLS.get(outdoor_data['temp_trend'], '')
         else:
             outdoor_temp_str = 'N/A'
+
+        # Format humidity
+        if outdoor_data['humidity'] is not None:
+            outdoor_humidity_str = f"{outdoor_data['humidity']:.1f} {self.units['humidity']}"
+        else:
+            outdoor_humidity_str = 'N/A'
+
+        # Calculate text height for positioning
+        (width_temp, height_temp) = utils.textsize(outdoor_temp_str, font=font_temp)
         
         # Draw temperature
         draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
+
+        # Draw humidity
+        self._draw_weather_symbol('humidity', right_x + 25, top_y + (3 * height_temp) + 50, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 50, symbol_size=(30, 30))
+
+        draw.text((right_x + 37, top_y + (3 * height_temp)+20), 
+                  f" {outdoor_humidity_str}", fill=BLACK, font=font_text)
         
     def _get_forecast_data(self, current_outdoor_temp=None):
         """Extract weather forecast data from instant section for each hour.
@@ -491,6 +507,34 @@ class WeatherDisplay:
         #     x = i * width // 4
         #     draw.line((x, mid_y, x, height - 2), fill=BLACK, width=2)
     
+    def _draw_weather_symbol(self, symbol_code, x, label_y, y, text_height, graph_top, graph_bottom, symbol_size=(50, 50)):
+        """Draw a weather symbol at the specified position
+        
+        Args:
+            symbol_code: Weather symbol code (filename without .png)
+            x: X position for center of symbol
+            label_y: Y position of temperature label
+            y: Y position of curve point
+            text_height: Height of temperature text
+            graph_top: Top boundary of graph
+            graph_bottom: Bottom boundary of graph
+            symbol_size: Tuple of (width, height) for symbol size
+        """
+        symbol_file = f"{symbol_code}.png"
+        symbol_path = os.path.join(self.symbols_dir, symbol_file)
+        
+        if os.path.isfile(symbol_path):
+            symbol = Image.open(symbol_path).resize(symbol_size)
+            
+            # Position symbol above the temperature label
+            symbol_x = x - symbol_size[0] // 2
+            symbol_y = label_y - symbol_size[1] - 5 if label_y < y else label_y + text_height + 5
+            
+            # Ensure symbol stays within bounds
+            symbol_y = max(graph_top - 50, min(symbol_y, graph_bottom - symbol_size[1]))
+            
+            self.image.paste(symbol, (symbol_x, symbol_y), mask=symbol)
+    
     def _draw_forecast(self, forecast_data, bottom_window_x, bottom_window_y, width, font_text):
         """Draw weather forecast section as a temperature curve graph
         
@@ -586,22 +630,9 @@ class WeatherDisplay:
                 label_y = y - text_height - 8 if y > graph_top + 60 else y + 8
                 draw.text((x - text_width // 2, label_y), temp_str, fill=BLACK, font=font_small)
                 
-                # Load and draw weather symbol
-                symbol_file = f"{forecast['symbol_code']}.png"
-                symbol_path = os.path.join(self.symbols_dir, symbol_file)
-                
-                if os.path.isfile(symbol_path):
-                    symbol_size = (50, 50)
-                    symbol = Image.open(symbol_path).resize(symbol_size)
-                    
-                    # Position symbol above the temperature label
-                    symbol_x = x - symbol_size[0] // 2
-                    symbol_y = label_y - symbol_size[1] - 5 if label_y < y else label_y + text_height + 5
-                    
-                    # Ensure symbol stays within bounds
-                    symbol_y = max(graph_top - 50, min(symbol_y, graph_bottom - symbol_size[1]))
-                    
-                    self.image.paste(symbol, (symbol_x, symbol_y), mask=symbol)
+                # Draw weather symbol
+                self._draw_weather_symbol(forecast['symbol_code'], x, label_y, y, text_height, 
+                                         graph_top, graph_bottom, symbol_size=(50, 50))
         
         # Draw graph border
         # draw.rectangle([(graph_left, graph_top), (graph_right, graph_bottom)], outline=BLACK, width=2)
