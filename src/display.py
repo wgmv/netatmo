@@ -4,6 +4,43 @@ Displays NetAtmo weather station data on a local screen
 input: data.json file, result of NetAtmo getstationsdata API
 screen: Waveshare ePaper / eInk Screen HAT for Raspberry Pi
 output: copy of the screen in file: image.bmp
+
+Usage Examples:
+
+# Basic usage with defaults (file-only mode):
+display = WeatherDisplay()
+display.generate()
+
+# With Waveshare 2.7" e-paper display:
+display = WeatherDisplay(screen_type='epd2in7')
+display.generate()
+
+# With Waveshare 5.83" e-paper display:
+display = WeatherDisplay(screen_type='epd5in83')
+display.generate()
+
+# Custom configuration:
+display = WeatherDisplay(
+    data_filename='custom/data.json',
+    weather_data_filename='custom/weather.json',
+    image_filename='my_display.bmp',
+    symbols_dir='custom_symbols',
+    image_width=1200,
+    image_height=600,
+    screen_type='epd5in83'
+)
+display.generate()
+
+# Configure via config.json by adding "screen_type" field:
+# {
+#   "client_id": "...",
+#   "screen_type": "epd2in7"  // Options: "epd2in7", "epd5in83", or null
+# }
+
+# Supported screen_type values:
+# - None or null: File-only mode (default)
+# - 'epd2in7': Waveshare 2.7" e-paper HAT
+# - 'epd5in83': Waveshare 5.83" e-paper HAT
 """
 
 import os
@@ -404,12 +441,6 @@ class WeatherDisplay:
             temp_str = f"{temp_min:.1f}{unit_temp} / {temp_max:.1f}{unit_temp}"
             draw.text((x_text, bottom_window_y + 30), temp_str, fill=BLACK, font=font_text)
     
-    def add_humidity_icon(self):
-        """Add humidity icon to the display"""
-        humidity_path = os.path.join(self.symbols_dir, "humidity.png")
-        if os.path.isfile(humidity_path):
-            humidity = Image.open(humidity_path)
-            self.image.paste(humidity, (600, 225), mask=humidity)
     
     def _init_screen(self):
         """Initialize the e-paper display based on screen_type
@@ -468,9 +499,6 @@ class WeatherDisplay:
         # Draw the weather data
         self.draw_image()
         
-        # Add additional icons
-        # self.add_humidity_icon()
-        
         # Save the result
         self.image.save(self.image_filename)
         displayLogger.info("Image saved to %s", self.image_filename)
@@ -500,43 +528,3 @@ def main():
 # main
 if __name__ == '__main__':
     main()
-
-"""
-Usage Examples:
-
-# Basic usage with defaults (file-only mode):
-display = WeatherDisplay()
-display.generate()
-
-# With Waveshare 2.7" e-paper display:
-display = WeatherDisplay(screen_type='epd2in7')
-display.generate()
-
-# With Waveshare 5.83" e-paper display:
-display = WeatherDisplay(screen_type='epd5in83')
-display.generate()
-
-# Custom configuration:
-display = WeatherDisplay(
-    data_filename='custom/data.json',
-    weather_data_filename='custom/weather.json',
-    image_filename='my_display.bmp',
-    symbols_dir='custom_symbols',
-    image_width=1200,
-    image_height=600,
-    screen_type='epd5in83'
-)
-display.generate()
-
-# Configure via config.json by adding "screen_type" field:
-# {
-#   "client_id": "...",
-#   "screen_type": "epd2in7"  // Options: "epd2in7", "epd5in83", or null
-# }
-
-# Supported screen_type values:
-# - None or null: File-only mode (default)
-# - 'epd2in7': Waveshare 2.7" e-paper HAT
-# - 'epd5in83': Waveshare 5.83" e-paper HAT
-"""
-
