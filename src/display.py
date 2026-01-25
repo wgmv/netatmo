@@ -249,8 +249,8 @@ class WeatherDisplay:
         battery_percent = f'Bateria: {battery} |'
         (width_time, height_time) = utils.textsize(data_time_str, font=font_time)
         (width_battery, height_battery) = utils.textsize(battery_percent, font=font_time)
-        draw.text((width - width_time - 5, 5), data_time_str, fill=BLACK, font=font_time)
-        draw.text((width - width_time - width_battery - 10, 5), battery_percent, fill=BLACK, font=font_time)
+        draw.text((width - width_time - 5, 5), data_time_str, fill=BLACK, font=font_time, stroke_width=.3)
+        draw.text((width - width_time - width_battery - 10, 5), battery_percent, fill=BLACK, font=font_time, stroke_width=.3)
 
         # Draw weather forecast
         if forecast_data:
@@ -324,12 +324,12 @@ class WeatherDisplay:
             draw.text((left_x, top_y - height_temp), indoor_data['name'], fill=BLACK, font=font_text)
         
         # Draw temperature
-        draw.text((left_x, top_y), indoor_temp_str, fill=BLACK, font=font_temp)
+        draw.text((left_x, top_y), indoor_temp_str, fill=BLACK, font=font_temp, stroke_width=.5)
 
         
         # Draw humidity and CO2
         self._draw_weather_symbol('humidity', left_x - 32, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
-        draw.text((left_x - 20, top_y + (3 * height_temp)),  f" {indoor_humidity_str}  CO₂: {indoor_co2_str}", fill=BLACK, font=font_small)
+        draw.text((left_x - 20, top_y + (3 * height_temp)),  f" {indoor_humidity_str}  CO₂: {indoor_co2_str}", fill=BLACK, font=font_small, stroke_width=.6)
         
     
     def _get_outdoor_data(self):
@@ -406,12 +406,12 @@ class WeatherDisplay:
             draw.text((right_x, top_y - height_temp), outdoor_data['name'], fill=BLACK, font=font_text)
         
         # Draw temperature
-        draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
+        draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp, stroke_width=.5)
 
         # Draw humidity
         self._draw_weather_symbol('humidity', right_x + 50, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
 
-        draw.text((right_x + 60, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_small)
+        draw.text((right_x + 60, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_small, stroke_width=.6)
         
     def _get_forecast_data(self, current_outdoor_temp=None):
         """Extract weather forecast data from instant section for each hour.
@@ -633,7 +633,7 @@ class WeatherDisplay:
             y = temp_to_y(forecast['temp'])
             
             # Mark every 3 hours on x-axis
-            if i % 3 == 0:
+            if (i + 1) % 3 == 0:
                 # Draw tick mark
                 draw.line([(x, graph_bottom), (x, graph_bottom + 5)], fill=BLACK, width=3)
                 
@@ -642,10 +642,9 @@ class WeatherDisplay:
                 hour_str = time_obj.strftime('%H:%M')
                 text_bbox = draw.textbbox((0, 0), hour_str, font=font_tiny)
                 text_width = text_bbox[2] - text_bbox[0]
-                draw.text((x - text_width // 2, graph_bottom + 8), hour_str, fill=BLACK, font=font_tiny)
-            
+                draw.text((x - text_width // 2, graph_bottom + 8), hour_str, fill=BLACK, font=font_tiny, stroke_width=.3)
             # Label every 6 hours with temp and weather symbol
-            if i % 6 == 0:
+            if (i+1) % 6 == 0:
                 # Draw point on curve
                 draw.ellipse([(x - 5, y - 5), (x + 5, y + 5)], fill=BLACK, outline=BLACK)
                 
