@@ -629,7 +629,7 @@ class WeatherDisplay:
             return (epd.height, epd.width)
         
         except Exception as e:
-            displayLogger.error(f"Failed to initialize {self.screen_type}: {e}", exc_info=True)
+            displayLogger.error("Failed to initialize %s: %s", self.screen_type, e, exc_info=True)
             return None
     
     def _display_on_screen(self):
@@ -642,10 +642,10 @@ class WeatherDisplay:
             self.epd.display(self.epd.getbuffer(self.image))
             self.epd.sleep()
             
-            displayLogger.info(f"Image displayed on {self.screen_type}")
+            displayLogger.info("Image displayed on %s", self.screen_type)
         
         except Exception as e:
-            displayLogger.error(f"Failed to display on {self.screen_type}: {e}", exc_info=True)
+            displayLogger.error("Failed to display on %s: %s", self.screen_type, e, exc_info=True)
     
     def generate(self):
         """Generate the complete weather display image
@@ -656,7 +656,7 @@ class WeatherDisplay:
         screen_size = self._init_screen()
         if screen_size:
             self.image_width, self.image_height = screen_size
-            displayLogger.info(f"Using screen {self.screen_type} with size {screen_size}")
+            displayLogger.info("Using screen %s with size %s", self.screen_type, screen_size)
         
         # Create blank image
         self.image = Image.new('1', (self.image_width, self.image_height), WHITE)
@@ -684,7 +684,7 @@ def main():
             config = utils.read_json(config_file)
             screen_type = config.get('screen_type', None)
         except Exception as e:
-            displayLogger.warning(f"Could not read screen_type from config: {e}")
+            displayLogger.warning("Could not read screen_type from config: %s", e)
     
     display = WeatherDisplay(screen_type=screen_type)
     display.generate()
