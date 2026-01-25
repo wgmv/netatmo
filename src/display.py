@@ -668,7 +668,7 @@ class WeatherDisplay:
             epd = module.EPD()
             epd.init()
             self.epd = epd
-            return (epd.height, epd.width)
+            return (epd.width, epd.height)
         
         except Exception as e:
             displayLogger.error("Failed to initialize %s: %s", self.screen_type, e, exc_info=True)
