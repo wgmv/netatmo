@@ -41,6 +41,12 @@ FONT_SIZE_TEXT = 25
 FONT_SIZE_TEMP = 50
 FONT_SIZE_TIME = 15
 
+TREND_SYMBOLS = {
+    'up': '\u2197',     # ↗
+    'down': '\u2198',   # ↘
+    'stable': '\u2192'  # →
+}
+
 WEATHER_SYMBOL_SIZE = (100, 100)
 
 displayLogger = logging.getLogger(__name__)
@@ -94,25 +100,7 @@ class WeatherDisplay:
         self.data = {}
         self.weather_data = {}
         self.image = None
-    
-    
-    @staticmethod
-    def trend_symbol(trend):
-        """Unicode symbol for temperature trend
-        
-        Args:
-            trend: Trend direction ('up', 'down', 'stable')
-            
-        Returns:
-            Unicode arrow character
-        """
-        trends = {
-            'up': '\u2197',     # ↗
-            'down': '\u2198',   # ↘
-            'stable': '\u2192'  # →
-        }
-        return trends.get(trend, ' ')
-    
+
     def _load_data(self):
         """Load data from JSON files
         
@@ -240,13 +228,13 @@ class WeatherDisplay:
             
             indoor_temp_str = f"{temp:.1f} {unit_temp}"
             if "temp_trend" in data:
-                indoor_temp_str += self.trend_symbol(data["temp_trend"])
+                indoor_temp_str += TREND_SYMBOLS[data["temp_trend"]]
             
             indoor_humidity_str = f"{humidity:.1f} {unit_humidity}"
             
             indoor_co2_str = f"{co2:.1f} {unit_co2}"
             if "pressure_trend" in data:
-                indoor_co2_str += self.trend_symbol(data["pressure_trend"])
+                indoor_co2_str += TREND_SYMBOLS[data["pressure_trend"]]
         
         return indoor_temp_str, indoor_humidity_str, indoor_co2_str
     
@@ -280,7 +268,7 @@ class WeatherDisplay:
                 humidity = data["Humidity"]
                 outdoor_temp_str = f"{temp:.1f} {unit_temp}"
                 if "temp_trend" in data:
-                    outdoor_temp_str += self.trend_symbol(data["temp_trend"])
+                    outdoor_temp_str += TREND_SYMBOLS[data["temp_trend"]]
                 outdoor_humidity_str = f"{humidity:.1f} {unit_humidity}"
                 
             elif module_type == "NAModule2":  # Wind Gauge
