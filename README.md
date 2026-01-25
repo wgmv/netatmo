@@ -389,7 +389,7 @@ Detach with: `Ctrl+B`, then `d`
 - [Original netatmo project by psauliere](https://github.com/psauliere/netatmo)
 - [netatmo-display by bkoopman](https://github.com/bkoopman/netatmo-display)
 
-## Tools```
+## Tools
 
 This will run the script as the `pi` user.
 
@@ -406,6 +406,7 @@ and detach from the session with this key sequence: `Ctrl+B`, `d`.
 # References
 
 - [NetAtmo developer documentation](https://dev.netatmo.com/)
+- [Met.no Weather API](https://api.met.no/weatherapi/locationforecast/2.0/documentation) - [Terms of Service](https://api.met.no/doc/TermsOfService)
 - [PaPiRus documentation](https://github.com/PiSupply/PaPiRus)
 - [Waveshare 2.7inch e-Paper documentation](https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT)
 - [Another NetAtmo Display project: netatmo-display](https://github.com/bkoopman/netatmo-display)
