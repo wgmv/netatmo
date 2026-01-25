@@ -163,7 +163,10 @@ class WeatherDisplay:
         if "body" not in self.data:
             displayLogger.error("Bad data format")
             return False
-        
+        if "dashboard_data" not in self.data["body"]["devices"][0]:
+            displayLogger.error("dashboard_data missing in data")
+            return False
+
         # Read weather data
         if os.path.isfile(self.weather_data_filename):
             self.weather_data = utils.read_json(self.weather_data_filename)
@@ -212,29 +215,12 @@ class WeatherDisplay:
         # Get units from user settings
         self.units = self._get_units()
 
-        # Battery percentage
-        battery = self.data['body']['devices'][0]['modules'][0]['battery_percent']
-        battery_percent = f'Bateria: {battery} |'
-
-        # Extract and format sensor values
-        indoor_temp_str, indoor_humidity_str, indoor_co2_str = self._get_indoor_data()
-        outdoor_temp_str, outdoor_humidity_str, rain_str, wind_str = self._get_outdoor_data()
-        
-        data_time_str = f"Aktualizowano  : {utils.timestr(self.data['time_server'])}"
+        # Extract sensor data
+        indoor_data = self._get_indoor_data()
+        outdoor_data = self._get_outdoor_data()
         
         # Get weather forecast data
         forecast_data = self._get_forecast_data()
-
-        # Calculate text dimensions
-        (width_indoor, height_indoor) = utils.textsize(indoor_temp_str, font=font_temp)
-        (width_outdoor, height_outdoor) = utils.textsize(outdoor_temp_str, font=font_temp)
-        (width_rain, height_rain) = utils.textsize(rain_str, font=font_temp)
-        (width_time, height_time) = utils.textsize(data_time_str, font=font_time)
-        (width_battery, height_battery) = utils.textsize(battery_percent, font=font_time)
-
-        # Maximum text width
-        txtwidth = max(width_indoor, width_outdoor, width_rain)
-        txtheight = height_indoor
 
         # Calculate window positions
         left_x = width // 8
@@ -246,15 +232,18 @@ class WeatherDisplay:
         # Draw layout structure
         self._draw_layout(draw, width, height)
 
-        # Draw temperatures
-        draw.text((left_x, top_y), indoor_temp_str, fill=BLACK, font=font_temp)
-        draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
-
-        # Draw indoor humidity and CO2
-        draw.text((right_x, top_y + (4 * txtheight)), 
-                  f"{indoor_humidity_str} / {indoor_co2_str}", fill=BLACK, font=font_text)
-
+        # Draw indoor data
+        self._draw_indoor_data(indoor_data, left_x, right_x, top_y, font_text, font_temp)
+        
+        # Draw outdoor data
+        self._draw_outdoor_data(outdoor_data, right_x, top_y, font_temp)
+        
         # Draw time and battery
+        battery = self.data['body']['devices'][0]['modules'][0]['battery_percent']
+        data_time_str = f"Aktualizowano  : {utils.timestr(self.data['time_server'])}"
+        battery_percent = f'Bateria: {battery} |'
+        (width_time, height_time) = utils.textsize(data_time_str, font=font_time)
+        (width_battery, height_battery) = utils.textsize(battery_percent, font=font_time)
         draw.text((width - width_time - 5, 5), data_time_str, fill=BLACK, font=font_time)
         draw.text((width - width_time - width_battery - 10, 5), battery_percent, fill=BLACK, font=font_time)
 
@@ -266,41 +255,84 @@ class WeatherDisplay:
         """Extract indoor sensor data
         
         Returns:
-            tuple: (temperature_str, humidity_str, co2_str)
+            dict: Indoor sensor data with temperature, humidity, CO2, and trends
         """
-        indoor_temp_str = 'N/A'
-        indoor_humidity_str = 'N/A'
-        indoor_co2_str = 'N/A'
-        
         device = self.data["body"]["devices"][0]
-        if "dashboard_data" in device:
-            data = device["dashboard_data"]
-            temp = data["Temperature"]
-            humidity = data["Humidity"]
-            co2 = data["CO2"]
+        if "dashboard_data" not in device:
+            return None
             
-            indoor_temp_str = f"{temp:.1f} {self.units['temp']}"
-            if "temp_trend" in data:
-                indoor_temp_str += TREND_SYMBOLS.get(data["temp_trend"], '')
-            
-            indoor_humidity_str = f"{humidity:.1f} {self.units['humidity']}"
-            
-            indoor_co2_str = f"{co2:.1f} {self.units['co2']}"
-            if "pressure_trend" in data:
-                indoor_co2_str += TREND_SYMBOLS.get(data["pressure_trend"], '')
+        data = device["dashboard_data"]
         
-        return indoor_temp_str, indoor_humidity_str, indoor_co2_str
+        return {
+            'temperature': data.get("Temperature"),
+            'humidity': data.get("Humidity"),
+            'co2': data.get("CO2"),
+            'temp_trend': data.get("temp_trend"),
+            'pressure_trend': data.get("pressure_trend")
+        }
+    
+    def _draw_indoor_data(self, indoor_data, left_x, right_x, top_y, font_text, font_temp):
+        """Draw indoor sensor data on the display
+        
+        Args:
+            indoor_data: Dictionary with indoor sensor values
+            left_x: X position for left text
+            right_x: X position for right text
+            top_y: Y position for top text
+            font_text: Font for regular text
+            font_temp: Font for temperature text
+        """
+        if not indoor_data:
+            return
+            
+        draw = ImageDraw.Draw(self.image)
+        
+        # Format temperature
+        if indoor_data['temperature'] is not None:
+            indoor_temp_str = f"{indoor_data['temperature']:.1f} {self.units['temp']}"
+            if indoor_data['temp_trend']:
+                indoor_temp_str += TREND_SYMBOLS.get(indoor_data['temp_trend'], '')
+        else:
+            indoor_temp_str = 'N/A'
+        
+        # Format humidity
+        if indoor_data['humidity'] is not None:
+            indoor_humidity_str = f"{indoor_data['humidity']:.1f} {self.units['humidity']}"
+        else:
+            indoor_humidity_str = 'N/A'
+        
+        # Format CO2
+        if indoor_data['co2'] is not None:
+            indoor_co2_str = f"{indoor_data['co2']:.1f} {self.units['co2']}"
+            if indoor_data['pressure_trend']:
+                indoor_co2_str += TREND_SYMBOLS.get(indoor_data['pressure_trend'], '')
+        else:
+            indoor_co2_str = 'N/A'
+        
+        # Draw temperature
+        draw.text((left_x, top_y), indoor_temp_str, fill=BLACK, font=font_temp)
+        
+        # Calculate text height for positioning
+        (width_temp, height_temp) = utils.textsize(indoor_temp_str, font=font_temp)
+        
+        # Draw humidity and CO2
+        draw.text((right_x, top_y + (4 * height_temp)), 
+                  f"{indoor_humidity_str} / {indoor_co2_str}", fill=BLACK, font=font_text)
+        
     
     def _get_outdoor_data(self):
         """Extract outdoor sensor data
         
         Returns:
-            tuple: (temperature_str, humidity_str, rain_str, wind_str)
+            dict: Outdoor sensor data including temperature, humidity, rain, wind, and trends
         """
-        outdoor_temp_str = 'N/A'
-        outdoor_humidity_str = 'N/A'
-        rain_str = 'N/A'
-        wind_str = 'N/A'
+        outdoor_data = {
+            'temperature': None,
+            'humidity': None,
+            'temp_trend': None,
+            'rain': None,
+            'wind': None
+        }
         
         device = self.data["body"]["devices"][0]
         for module in device["modules"]:
@@ -311,23 +343,45 @@ class WeatherDisplay:
             data = module["dashboard_data"]
             
             if module_type == "NAModule1":  # Outdoor Module
-                temp = data["Temperature"]
-                humidity = data["Humidity"]
-                outdoor_temp_str = f"{temp:.1f} {self.units['temp']}"
-                if "temp_trend" in data:
-                    outdoor_temp_str += TREND_SYMBOLS.get(data["temp_trend"], '')
-                outdoor_humidity_str = f"{humidity:.1f} {self.units['humidity']}"
+                outdoor_data['temperature'] = data.get("Temperature")
+                outdoor_data['humidity'] = data.get("Humidity")
+                outdoor_data['temp_trend'] = data.get("temp_trend")
                 
             elif module_type == "NAModule2":  # Wind Gauge
-                wind = data.get("WindStrength", 0)
-                wind_str = f"{wind:.1f} {self.units['wind']}"
+                outdoor_data['wind'] = data.get("WindStrength", 0)
                 
             elif module_type == "NAModule3":  # Rain Gauge
-                rain = data.get("sum_rain_24", 0)
-                rain_str = f"{rain:.1f} mm"
+                outdoor_data['rain'] = data.get("sum_rain_24", 0)
         
-        return outdoor_temp_str, outdoor_humidity_str, rain_str, wind_str
+        return outdoor_data
     
+    def _draw_outdoor_data(self, outdoor_data, right_x, top_y, font_temp):
+        """Draw outdoor sensor data on the display
+        
+        Args:
+            outdoor_data: Dictionary with outdoor sensor values
+            right_x: X position for text
+            top_y: Y position for top text
+            font_temp: Font for temperature text
+        """
+        if not outdoor_data:
+            return
+            
+        draw = ImageDraw.Draw(self.image)
+        
+        # Format temperature
+        if outdoor_data['temperature'] is not None:
+            outdoor_temp_str = f"{outdoor_data['temperature']:.1f} {self.units['temp']}"
+            if outdoor_data['temp_trend']:
+                outdoor_temp_str += TREND_SYMBOLS.get(outdoor_data['temp_trend'], '')
+        else:
+            outdoor_temp_str = 'N/A'
+        
+        # Draw temperature
+        draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
+        
+    def _draw_outdoor_data(self, outdoor_data, right_x, top_y, font_temp):
+        1
     def _get_forecast_data(self):
         """Extract weather forecast data from instant section for each hour.
         
@@ -371,7 +425,7 @@ class WeatherDisplay:
                     'symbol_code': symbol_code,
                     'temp': temp
                 })
-        print(forecast_data)
+
         return forecast_data
     
     def _draw_layout(self, draw, width, height):
