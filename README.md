@@ -8,7 +8,6 @@ NetAtmo weather station display with weather forecast, based on a Raspberry Pi a
 * [Features](#features)
 * [Installation](#installation)
   * [Raspbian/Raspberry Pi OS](#raspbian)
-  * [PaPiRus setup](#papirus)
   * [Waveshare Setup](#waveshare)
   * [Download the app!](#download)
   * [NetAtmo API](#netatmoapi)
@@ -36,7 +35,7 @@ The first setup I tried is this one:
 
 - [Raspberry Pi Zero W][3]. The Zero W can be found with a soldered header if soldering is not your thing: it is called a [Raspberry Pi Zero WH][4].
 
-- [Waveshare 5.83inch e-Paper HAT][10], which has the same size and resolution of 264 x 176 as the PaPiRus.
+- [Waveshare 5.83inch e-Paper HAT][10]
 
 [3]: https://www.berrybase.de/raspberry-pi-zero-2-w
 
@@ -65,7 +64,6 @@ This weather station display includes:
   - Forecast normalization using current outdoor temperature (Kelvin-based percentage offset to avoid zero-crossing distortion)
 - **Configurable Display Support**:
   - Waveshare e-Paper displays (epd2in7, epd5in83, epd5in83b)
-  - PaPiRus e-Paper HAT
   - File-only mode (generates image.bmp without physical display)
 - **Automatic Token Refresh**: OAuth token management with automatic refresh
 - **Weather Data Integration**: Uses Met.no weather forecast API
@@ -208,14 +206,14 @@ Download the code in your home dir:
 
 ```
 cd
-git clone https://github.com/psauliere/netatmo.git
+git clone https://github.com/wgmv/netatmo.git
 cd netatmo
 ```
 
 To test the display module, type this:
 
 ```
-cp sample_data.json data.json
+cp sample_data.json data/data.json
 ./display.py
 ```
 
@@ -380,7 +378,6 @@ Detach with: `Ctrl+B`, then `d`
 - [Met.no Locationforecast API](https://api.met.no/weatherapi/locationforecast/2.0/documentation)
 
 ## Hardware
-- [PaPiRus documentation](https://github.com/PiSupply/PaPiRus)
 - [Waveshare e-Paper displays](https://www.waveshare.com/wiki/Main_Page#OLEDs_.2F_LCDs)
 - [Waveshare 2.7" e-Paper HAT](https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT)
 - [Waveshare 5.83" e-Paper HAT](https://www.waveshare.com/wiki/5.83inch_e-Paper_HAT)
@@ -388,6 +385,7 @@ Detach with: `Ctrl+B`, then `d`
 ## Related Projects
 - [Original netatmo project by psauliere](https://github.com/psauliere/netatmo)
 - [netatmo-display by bkoopman](https://github.com/bkoopman/netatmo-display)
+- [netatmo by SteinTokvam](https://github.com/SteinTokvam/netatmo)
 
 ## Tools
 
@@ -407,7 +405,6 @@ and detach from the session with this key sequence: `Ctrl+B`, `d`.
 
 - [NetAtmo developer documentation](https://dev.netatmo.com/)
 - [Met.no Weather API](https://api.met.no/weatherapi/locationforecast/2.0/documentation) - [Terms of Service](https://api.met.no/doc/TermsOfService)
-- [PaPiRus documentation](https://github.com/PiSupply/PaPiRus)
 - [Waveshare 2.7inch e-Paper documentation](https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT)
 - [Another NetAtmo Display project: netatmo-display](https://github.com/bkoopman/netatmo-display)
 
