@@ -1,16 +1,18 @@
 # netatmo
 
-NetAtmo weather station display, based on a Raspberry Pi and an e-Paper screen.
+NetAtmo weather station display with weather forecast, based on a Raspberry Pi and an e-Paper screen.
 
 <details><summary>Table of contents</summary>
 
 * [Introduction](#introduction)
+* [Features](#features)
 * [Installation](#installation)
   * [Raspbian/Raspberry Pi OS](#raspbian)
   * [PaPiRus setup](#papirus)
   * [Waveshare Setup](#waveshare)
   * [Download the app!](#download)
   * [NetAtmo API](#netatmoapi)
+  * [Met.no Weather API](#metno)
 * [Files](#files)
 * [Running the program](#running)
 * [Launching on system startup](#startup)
@@ -47,6 +49,27 @@ The first setup I tried is this one:
 The Waveshare is well attached and the whole setup is much more robust.
 
 I chose Python 3 for the code as it is available and up to date on every Raspbery Pi OS.
+
+<a name="features"></a>
+
+# Features
+
+This weather station display includes:
+
+- **Indoor Data**: Temperature, humidity, CO₂ levels with trend indicators
+- **Outdoor Data**: Temperature with trend indicators, humidity, rain (24h), wind speed
+- **Weather Forecast**: 24-hour temperature forecast displayed as a curve graph
+  - Temperature curve with data points
+  - Weather symbols every 6 hours
+  - Time markers every 3 hours
+  - Forecast normalization using current outdoor temperature (Kelvin-based percentage offset to avoid zero-crossing distortion)
+- **Configurable Display Support**:
+  - Waveshare e-Paper displays (epd2in7, epd5in83, epd5in83b)
+  - PaPiRus e-Paper HAT
+  - File-only mode (generates image.bmp without physical display)
+- **Automatic Token Refresh**: OAuth token management with automatic refresh
+- **Weather Data Integration**: Uses Met.no weather forecast API
+- **Simple Architecture**: Sequential execution with no threading complexity
 
 <a name="installation"></a>
 
@@ -222,27 +245,58 @@ Edit the `config.json` file with your values:
 {
     "client_id": "your app client id",
     "client_secret": "your app client secret",
-    "device_id": "your indoor module serial number"
+    "device_id": "your indoor module serial number",
+    "refresh_time": 600,
+    "screen_type": null,
+    "location": {
+        "longitude": 0.0,
+        "latitude": 0.0,
+        "altitude": 0
+    }
 }
 ```
 
-Edit the `token.json` file with your tokens:
-```json
-{
-    "access_token": "you Access Token",
-    "refresh_token": "your Refresh Token"
-}
-```
+Configuration parameters:
+- `client_id`, `client_secret`, `device_id`: NetAtmo API credentials (required)
+- `refresh_time`: Seconds between station data updates (default: 600)
+- `screen_type`: Display type - `"epd2in7"`, `"epd5in83"`, `"epd5in83b"`, or `null` for file-only mode
+- `location`: Your location for weather forecast (latitude/longitude rounded to 4 decimals, altitude in meters)
+## Configuration Files
 
-<a name="files"></a>
+- `config/config.json`: Main configuration file with API credentials, refresh settings, display type, and location
+- `config/token.json`: OAuth tokens (access and refresh tokens), automatically updated by the application
 
-# Files
+## Source Files
 
-You need these 4 files to begin:
+- `src/netatmo.py`: Main service module - fetches station data every 10 minutes, weather data every hour, manages token refresh
+- `src/display.py`: Display rendering module - creates the weather display image with forecast curve graph
+- `src/weather.py`: Weather service - fetches forecast data from Met.no API
+- `src/reader.py`: NetAtmo API client - handles station data retrieval and authentication
+- `src/formatters.py`: Data formatting utilities
+- `src/utils.py`: Common utilities (JSON I/O, time formatting, text sizing)
 
-- `config.json`
-- `token.json`
-- `netatmo.py`
+## Data Files (created automatically)
+
+- `data/data.json`: Latest weather station data from NetAtmo API
+- `data/weather_data.json`: Latest weather forecast from Met.no API
+- `image.bmp`: Generated display image
+
+## Display Features
+
+The display shows:
+
+- **Top Left**: Indoor temperature with trend arrow, humidity 💧, and CO₂ levels
+- **Top Right**: Outdoor temperature with trend arrow
+- **Bottom**: 24-hour temperature forecast as a curve graph
+  - Continuous temperature curve line
+  - Weather symbols every 6 hours
+  - Temperature labels every 6 hours  
+  - Time markers every 3 hours
+  - Forecast automatically normalized using current outdoor temperature
+
+Example display:
+
+![Sample image](images/sample_image.bmp "Sample image")
 - `display.py` or `custom_display.py`
 
 If `config/config.json` does not exist, `netatmo.py` creates an empty one and you have to edit it. `config.json` is the configuration file. You must edit this file with your values (see above).
@@ -273,36 +327,69 @@ In this example, the display shows:
 - the rain in mm/h
 
 <a name="running"></a>
+the main service:
 
-# Running the program
-
-Run `./netatmo.py`, for instance in a `tmux` session to let it run even when you disconnect your SSH session.
-
-On the console, you will see that:
-
- - Every 10 minutes, netatmo.py gets weather data and prints 1 line on the console with the date, time, temperatures and, if you have the modules, rain and wind data.
- - Every three hours, the access token expires and the program refreshes it.
-
-To stop the program, type Ctrl+C.
-
-![netatmo.py screenshot](images/console_screenshot.png "netatmo.py running in a tmux session")
-
-<a name="startup"></a>
-
-# Launching on system startup
-
-To act like an appliance, the program must survive power failures, that is it must automatically launch on system boot. As I find it convenient to use tmux to be able to watch the program's console output anytime I ssh to the system, the `launcher.sh` script creates a tmux session named NETATMO and launches `netatmo.py` inside the new tmux session.
-
-First you need to install `tmux` if not already done:
+```bash
+python3 src/netatmo.py
 ```
+
+Or use a `tmux` session to let it run even when you disconnect your SSH session:
+
+```bash
+tmux new -s netatmo
+python3 src/netatmo.py
+```
+
+The program will:
+- Fetch station data every 10 minutes (configurable via `refresh_time`)
+- Feutomatically launch the program on system boot, use the `launcher.sh` script which creates a tmux session and starts the service.
+
+First install `tmux` if not already done:
+```bash
 sudo apt install tmux
 ```
 
-To run the `launcher.sh` script at system startup, edit the `/etc/rc.local` file as root and add this line, *before* the `exit 0` line:
+Edit the script to use your Python path if needed, then set up autostart by editing `/etc/rc.local`:
 
+```bash
+sudo nano /etc/rc.local
 ```
+
+Add this line *before* the `exit 0` line:
+
+```bash
 su -c /home/pi/netatmo/launcher.sh -l pi
 ```
+
+This runs the script as the `pi` user.
+
+After reboot, attach to the session:
+
+```bash
+tmux attach -t NETATMO
+```
+
+Detach with: `Ctrl+B`, then `d`
+
+<a name="references"></a>
+
+# References
+
+## APIs
+- [NetAtmo Developer Documentation](https://dev.netatmo.com/)
+- [Met.no Locationforecast API](https://api.met.no/weatherapi/locationforecast/2.0/documentation)
+
+## Hardware
+- [PaPiRus documentation](https://github.com/PiSupply/PaPiRus)
+- [Waveshare e-Paper displays](https://www.waveshare.com/wiki/Main_Page#OLEDs_.2F_LCDs)
+- [Waveshare 2.7" e-Paper HAT](https://www.waveshare.com/wiki/2.7inch_e-Paper_HAT)
+- [Waveshare 5.83" e-Paper HAT](https://www.waveshare.com/wiki/5.83inch_e-Paper_HAT)
+
+## Related Projects
+- [Original netatmo project by psauliere](https://github.com/psauliere/netatmo)
+- [netatmo-display by bkoopman](https://github.com/bkoopman/netatmo-display)
+
+## Tools```
 
 This will run the script as the `pi` user.
 
