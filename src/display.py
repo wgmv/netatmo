@@ -54,6 +54,7 @@ from datetime import datetime
 from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
+from PIL import ImageOps
 
 import utils
 
@@ -79,7 +80,7 @@ DEFAULT_IMAGE_WIDTH = 648
 DEFAULT_IMAGE_HEIGHT = 480
 
 FONT_SIZE_TEXT = 28
-FONT_SIZE_TEMP = 55
+FONT_SIZE_TEMP = 50
 FONT_SIZE_TIME = 18
 
 TREND_SYMBOLS = {
@@ -216,6 +217,7 @@ class WeatherDisplay:
         font_temp = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TEMP)
         font_time = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TIME)
 
+
         # Get units from user settings
         self.units = self._get_units()
 
@@ -228,8 +230,8 @@ class WeatherDisplay:
         forecast_data = self._get_forecast_data(current_temp)
 
         # Calculate window positions
-        left_x = width // 8
-        right_x = width // 2 + width // 6
+        left_x = width // 9
+        right_x = width // 2 + width // 9
         top_y = height // 6
 
         # Draw layout structure
@@ -290,7 +292,8 @@ class WeatherDisplay:
             return
             
         draw = ImageDraw.Draw(self.image)
-        
+        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 20)  # Smaller font for humidity/CO2
+
         # Format temperature
         if indoor_data['temperature'] is not None:
             indoor_temp_str = f"{indoor_data['temperature']:.1f} {self.units['temp']}"
@@ -307,7 +310,7 @@ class WeatherDisplay:
         
         # Format CO2
         if indoor_data['co2'] is not None:
-            indoor_co2_str = f"{indoor_data['co2']:.1f} {self.units['co2']}"
+            indoor_co2_str = f"{indoor_data['co2']:.0f} {self.units['co2']}"
             if indoor_data['pressure_trend']:
                 indoor_co2_str += TREND_SYMBOLS.get(indoor_data['pressure_trend'], '')
         else:
@@ -325,8 +328,8 @@ class WeatherDisplay:
 
         
         # Draw humidity and CO2
-        self._draw_weather_symbol('humidity', left_x - 42, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
-        draw.text((left_x - 30, top_y + (3 * height_temp)),  f" {indoor_humidity_str} / CO₂: {indoor_co2_str}", fill=BLACK, font=font_text)
+        self._draw_weather_symbol('humidity', left_x - 32, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
+        draw.text((left_x - 20, top_y + (3 * height_temp)),  f" {indoor_humidity_str}  CO₂: {indoor_co2_str}", fill=BLACK, font=font_small)
         
     
     def _get_outdoor_data(self):
@@ -379,6 +382,7 @@ class WeatherDisplay:
             return
             
         draw = ImageDraw.Draw(self.image)
+        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 20)  # Smaller font for humidity/CO2
         
         # Format temperature
         if outdoor_data['temperature'] is not None:
@@ -405,9 +409,9 @@ class WeatherDisplay:
         draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
 
         # Draw humidity
-        self._draw_weather_symbol('humidity', right_x + 25, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
+        self._draw_weather_symbol('humidity', right_x + 50, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
 
-        draw.text((right_x + 35, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_text)
+        draw.text((right_x + 60, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_small)
         
     def _get_forecast_data(self, current_outdoor_temp=None):
         """Extract weather forecast data from instant section for each hour.
@@ -536,6 +540,20 @@ class WeatherDisplay:
         if os.path.isfile(symbol_path):
             symbol = Image.open(symbol_path).resize(symbol_size)
             
+            # Invert the symbol colors (black background, white symbols)
+            if symbol.mode == 'RGBA':
+                # For RGBA images, invert RGB channels but keep alpha
+                r, g, b, a = symbol.split()
+                rgb_image = Image.merge('RGB', (r, g, b))
+                inverted_rgb = ImageOps.invert(rgb_image)
+                r, g, b = inverted_rgb.split()
+                symbol = Image.merge('RGBA', (r, g, b, a))
+            elif symbol.mode == 'RGB':
+                symbol = ImageOps.invert(symbol)
+            elif symbol.mode == 'L' or symbol.mode == '1':
+                # For grayscale or binary images
+                symbol = ImageOps.invert(symbol.convert('L'))
+            
             # Position symbol above the temperature label
             symbol_x = x - symbol_size[0] // 2
             symbol_y = label_y - symbol_size[1] - 5 if label_y < y else label_y + text_height + 5
@@ -544,6 +562,7 @@ class WeatherDisplay:
             symbol_y = max(graph_top - 50, min(symbol_y, graph_bottom - symbol_size[1]))
             
             self.image.paste(symbol, (symbol_x, symbol_y), mask=symbol)
+    
     
     def _draw_forecast(self, forecast_data, width):
         """Draw weather forecast section as a temperature curve graph
