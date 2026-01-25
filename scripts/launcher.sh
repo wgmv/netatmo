@@ -6,7 +6,7 @@ echo "Launching tmux"
 # allow re-launch
 tmux has-session -t $SESSION 2>/dev/null && tmux kill-session -t $SESSION
 
-tmux new-session -d -s $SESSION "python3 ../src/netatmo.py"
+tmux new-session -d -s $SESSION "python3 /home/wav/netatmo/src/netatmo.py"
 
 # Attach to the session
 # tmux attach-session -t $SESSION
