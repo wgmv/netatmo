@@ -304,7 +304,7 @@ class WeatherDisplay:
         
         # Format humidity
         if indoor_data['humidity'] is not None:
-            indoor_humidity_str = f"{indoor_data['humidity']:.1f} {self.units['humidity']}"
+            indoor_humidity_str = f"{indoor_data['humidity']:.0f} {self.units['humidity']}"
         else:
             indoor_humidity_str = 'N/A'
         
@@ -394,7 +394,7 @@ class WeatherDisplay:
 
         # Format humidity
         if outdoor_data['humidity'] is not None:
-            outdoor_humidity_str = f"{outdoor_data['humidity']:.1f} {self.units['humidity']}"
+            outdoor_humidity_str = f"{outdoor_data['humidity']:.0f} {self.units['humidity']}"
         else:
             outdoor_humidity_str = 'N/A'
 
