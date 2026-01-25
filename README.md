@@ -63,7 +63,7 @@ This weather station display includes:
   - Time markers every 3 hours
   - Forecast normalization using current outdoor temperature (Kelvin-based percentage offset to avoid zero-crossing distortion)
 - **Configurable Display Support**:
-  - Waveshare e-Paper displays (epd2in7, epd5in83b_V2, epd5in83b)
+  - Waveshare e-Paper displays (epd2in7, epd5in83, epd5in83_V2, epd5in83b_V2)
   - File-only mode (generates image.bmp without physical display)
 - **Automatic Token Refresh**: OAuth token management with automatic refresh
 - **Weather Data Integration**: Uses Met.no weather forecast API
@@ -257,7 +257,7 @@ Edit the `config.json` file with your values:
 Configuration parameters:
 - `client_id`, `client_secret`, `device_id`: NetAtmo API credentials (required)
 - `refresh_time`: Seconds between station data updates (default: 600)
-- `screen_type`: Display type - `"epd2in7"`, `"epd5in83b_V2"`, `"epd5in83b"`, or `null` for file-only mode
+- `screen_type`: Display type - `"epd2in7"`, `"epd5in83"`, `"epd5in83_V2"`, `"epd5in83b_V2"`, or `null` for file-only mode
 - `location`: Your location for weather forecast (latitude/longitude rounded to 4 decimals, altitude in meters)
 ## Configuration Files
 

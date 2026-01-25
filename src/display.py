@@ -40,7 +40,9 @@ display.generate()
 # Supported screen_type values:
 # - None or null: File-only mode (default)
 # - 'epd2in7': Waveshare 2.7" e-paper HAT
-# - 'epd5in83b_V2': Waveshare 5.83" e-paper HAT
+# - 'epd5in83': Waveshare 5.83" e-paper HAT (B/W)
+# - 'epd5in83_V2': Waveshare 5.83" e-paper HAT V2 (B/W)
+# - 'epd5in83b_V2': Waveshare 5.83" e-paper HAT V2 (B/W/R)
 """
 
 import os
@@ -119,7 +121,7 @@ class WeatherDisplay:
             symbols_dir: Directory containing weather symbol images
             image_width: Width of output image in pixels
             image_height: Height of output image in pixels
-            screen_type: Screen type ('epd2in7', 'epd5in83b_V2', None for file only)
+            screen_type: Screen type ('epd2in7', 'epd5in83', 'epd5in83_V2', 'epd5in83b_V2', None for file only)
         """
         self.data_filename = data_filename
         self.weather_data_filename = weather_data_filename
@@ -678,10 +680,18 @@ class WeatherDisplay:
             return
         
         try:
-            # All waveshare displays use the same method
-            self.epd.display(self.epd.getbuffer(self.image))
-            self.epd.sleep()
+            # Check if this is a 3-color display (with red)
+            if 'b' in self.screen_type.lower() and hasattr(self.epd, 'display'):
+                # 3-color displays need separate black and red images
+                # For simplicity, use the same image for black and a blank image for red
+                black_image = self.image
+                red_image = Image.new('1', (self.image_width, self.image_height), WHITE)
+                self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
+            else:
+                # 2-color displays (black and white only)
+                self.epd.display(self.epd.getbuffer(self.image))
             
+            self.epd.sleep()
             displayLogger.info("Image displayed on %s", self.screen_type)
         
         except Exception as e:
