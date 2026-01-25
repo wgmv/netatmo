@@ -16,7 +16,7 @@ display = WeatherDisplay(screen_type='epd2in7')
 display.generate()
 
 # With Waveshare 5.83" e-paper display:
-display = WeatherDisplay(screen_type='epd5in83')
+display = WeatherDisplay(screen_type='epd5in83b_V2')
 display.generate()
 
 # Custom configuration:
@@ -27,20 +27,20 @@ display = WeatherDisplay(
     symbols_dir='custom_symbols',
     image_width=1200,
     image_height=600,
-    screen_type='epd5in83'
+    screen_type='epd5in83b_V2'
 )
 display.generate()
 
 # Configure via config.json by adding "screen_type" field:
 # {
 #   "client_id": "...",
-#   "screen_type": "epd2in7"  // Options: "epd2in7", "epd5in83", or null
+#   "screen_type": "epd2in7"  // Options: "epd2in7", "epd5in83b_V2", or null
 # }
 
 # Supported screen_type values:
 # - None or null: File-only mode (default)
 # - 'epd2in7': Waveshare 2.7" e-paper HAT
-# - 'epd5in83': Waveshare 5.83" e-paper HAT
+# - 'epd5in83b_V2': Waveshare 5.83" e-paper HAT
 """
 
 import os
@@ -119,7 +119,7 @@ class WeatherDisplay:
             symbols_dir: Directory containing weather symbol images
             image_width: Width of output image in pixels
             image_height: Height of output image in pixels
-            screen_type: Screen type ('epd2in7', 'epd5in83', None for file only)
+            screen_type: Screen type ('epd2in7', 'epd5in83b_V2', None for file only)
         """
         self.data_filename = data_filename
         self.weather_data_filename = weather_data_filename
