@@ -75,12 +75,12 @@ DEFAULT_WEATHER_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'weather_data.jso
 DEFAULT_IMAGE_FILENAME = os.path.join(BASE_DIR, 'image.bmp')
 DEFAULT_SYMBOLS_DIR = os.path.join(BASE_DIR, 'assets', 'symbols')
 
-DEFAULT_IMAGE_WIDTH = 960
-DEFAULT_IMAGE_HEIGHT = 540
+DEFAULT_IMAGE_WIDTH = 648
+DEFAULT_IMAGE_HEIGHT = 480
 
-FONT_SIZE_TEXT = 25
-FONT_SIZE_TEMP = 50
-FONT_SIZE_TIME = 15
+FONT_SIZE_TEXT = 28
+FONT_SIZE_TEMP = 55
+FONT_SIZE_TIME = 18
 
 TREND_SYMBOLS = {
     'up': '\u2197',     # ↗
@@ -325,9 +325,8 @@ class WeatherDisplay:
 
         
         # Draw humidity and CO2
-        self._draw_weather_symbol('humidity', left_x - 12, top_y + (3 * height_temp) + 50, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 50, symbol_size=(30, 30))
-        draw.text((left_x, top_y + (3 * height_temp)+20), 
-                  f" {indoor_humidity_str} / CO₂: {indoor_co2_str}", fill=BLACK, font=font_text)
+        self._draw_weather_symbol('humidity', left_x - 42, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
+        draw.text((left_x - 30, top_y + (3 * height_temp)),  f" {indoor_humidity_str} / CO₂: {indoor_co2_str}", fill=BLACK, font=font_text)
         
     
     def _get_outdoor_data(self):
@@ -406,9 +405,9 @@ class WeatherDisplay:
         draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp)
 
         # Draw humidity
-        self._draw_weather_symbol('humidity', right_x + 25, top_y + (3 * height_temp) + 50, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 50, symbol_size=(30, 30))
+        self._draw_weather_symbol('humidity', right_x + 25, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
 
-        draw.text((right_x + 37, top_y + (3 * height_temp)+20), f" {outdoor_humidity_str}", fill=BLACK, font=font_text)
+        draw.text((right_x + 35, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_text)
         
     def _get_forecast_data(self, current_outdoor_temp=None):
         """Extract weather forecast data from instant section for each hour.
@@ -565,7 +564,7 @@ class WeatherDisplay:
         graph_left = 50
         graph_right = width - 50
         graph_top = self.image_height // 2 + 20
-        graph_bottom = self.image_height - 80
+        graph_bottom = self.image_height - 50
         graph_width = graph_right - graph_left
         graph_height = graph_bottom - graph_top
         
@@ -604,11 +603,11 @@ class WeatherDisplay:
         
         # Draw the curve line
         if len(curve_points) > 1:
-            draw.line(curve_points, fill=BLACK, width=3)
+            draw.line(curve_points, fill=BLACK, width=5)
         
         # Draw markers and labels
-        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 18)
-        font_tiny = ImageFont.truetype(DEFAULT_FONT_FILE, 12)
+        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 22)
+        font_tiny = ImageFont.truetype(DEFAULT_FONT_FILE, 16)
         
         for i, forecast in enumerate(forecast_data):
             x = hour_to_x(i)
@@ -617,7 +616,7 @@ class WeatherDisplay:
             # Mark every 3 hours on x-axis
             if i % 3 == 0:
                 # Draw tick mark
-                draw.line([(x, graph_bottom), (x, graph_bottom + 5)], fill=BLACK, width=2)
+                draw.line([(x, graph_bottom), (x, graph_bottom + 5)], fill=BLACK, width=3)
                 
                 # Draw hour label
                 time_obj = datetime.fromisoformat(forecast['time'])
@@ -629,7 +628,7 @@ class WeatherDisplay:
             # Label every 6 hours with temp and weather symbol
             if i % 6 == 0:
                 # Draw point on curve
-                draw.ellipse([(x - 4, y - 4), (x + 4, y + 4)], fill=BLACK, outline=BLACK)
+                draw.ellipse([(x - 5, y - 5), (x + 5, y + 5)], fill=BLACK, outline=BLACK)
                 
                 # Draw temperature label
                 temp_str = f"{forecast['temp']:.1f}{self.units['temp']}"
@@ -638,12 +637,12 @@ class WeatherDisplay:
                 text_height = text_bbox[3] - text_bbox[1]
                 
                 # Position text above or below point depending on space
-                label_y = y - text_height - 8 if y > graph_top + 60 else y + 8
+                label_y = y - text_height - 15 if y > graph_top + 60 else y + 15
                 draw.text((x - text_width // 2, label_y), temp_str, fill=BLACK, font=font_small)
                 
                 # Draw weather symbol
                 self._draw_weather_symbol(forecast['symbol_code'], x, label_y, y, text_height, 
-                                         graph_top, graph_bottom, symbol_size=(50, 50))
+                                         graph_top, graph_bottom, symbol_size=(60, 60))
         
         # Draw graph border
         # draw.rectangle([(graph_left, graph_top), (graph_right, graph_bottom)], outline=BLACK, width=2)
