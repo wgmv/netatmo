@@ -49,7 +49,7 @@ import os
 import logging
 import sys
 import importlib
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from PIL import Image
 from PIL import ImageDraw
