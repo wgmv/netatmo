@@ -229,8 +229,6 @@ class WeatherDisplay:
         left_x = width // 8
         right_x = width // 2 + width // 6
         top_y = height // 6
-        bottom_x = 10
-        bottom_y = height // 2 + 150
 
         # Draw layout structure
         self._draw_layout(draw, width, height)
@@ -252,7 +250,7 @@ class WeatherDisplay:
 
         # Draw weather forecast
         if forecast_data:
-            self._draw_forecast(forecast_data, bottom_x, bottom_y, width, font_text)
+            self._draw_forecast(forecast_data, width)
     
     def _get_indoor_data(self):
         """Extract indoor sensor data
@@ -546,7 +544,7 @@ class WeatherDisplay:
             
             self.image.paste(symbol, (symbol_x, symbol_y), mask=symbol)
     
-    def _draw_forecast(self, forecast_data, bottom_window_x, bottom_window_y, width, font_text):
+    def _draw_forecast(self, forecast_data, width):
         """Draw weather forecast section as a temperature curve graph
         
         Args:
