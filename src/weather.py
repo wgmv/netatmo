@@ -59,6 +59,69 @@ class WeatherServiceMetNo:
         except requests.exceptions.RequestException:
             weatherLogger.error("get_weather_data() RequestException:", exc_info=1)
 
+
+class AirQualityServiceWAQI:
+    """Service for fetching air quality data from WAQI API."""
+    
+    def __init__(self, config_filename=None, aqi_data_filename=None):
+        """Initialize the air quality service.
+        
+        Args:
+            config_filename: Path to config JSON file
+            aqi_data_filename: Path to output air quality data JSON file
+        """
+        self.config_filename = config_filename or os.path.join(CONFIG_DIR, "config.json")
+        self.aqi_data_filename = aqi_data_filename or os.path.join(DATA_DIR, "aqi_data.json")
+    
+    def get_aqi_data(self):
+        """Gets air quality data from WAQI API. Result: aqi_data.json file.
+        
+        Requires 'waqi_token' in config.json.
+        Get your token at: https://aqicn.org/data-platform/token/
+        """
+        # Reload config to get latest location data and token
+        config = utils.read_json(self.config_filename)
+        
+        if 'waqi_token' not in config:
+            weatherLogger.error("WAQI token not found in config.json. Get one at: https://aqicn.org/data-platform/token/")
+            return
+        
+        lat = round(config['location']['latitude'], 4)
+        lon = round(config['location']['longitude'], 4)
+        token = config['waqi_token']
+        
+        # Use geo-localized feed endpoint
+        url = f"https://api.waqi.info/feed/geo:{lat};{lon}/"
+        params = {'token': token}
+
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=30
+            )
+
+            weatherLogger.debug("%d %s", response.status_code, response.text)
+            response.raise_for_status()
+            aqi_data = response.json()
+            
+            if aqi_data.get('status') == 'ok':
+                utils.write_json(aqi_data, self.aqi_data_filename)
+                weatherLogger.info("Air quality data retrieved successfully. AQI: %s", 
+                                 aqi_data.get('data', {}).get('aqi', 'N/A'))
+            else:
+                weatherLogger.warning("WAQI API returned status: %s", aqi_data.get('status'))
+                
+        except requests.exceptions.HTTPError as e:
+            weatherLogger.warning("get_aqi_data() HTTPError")
+            weatherLogger.warning("%d %s", e.response.status_code, e.response.text)
+        except requests.exceptions.RequestException:
+            weatherLogger.error("get_aqi_data() RequestException:", exc_info=1)
+
+
 if __name__ == '__main__':
-    service = WeatherServiceMetNo()
-    service.get_weather_data()
+    weather_service = WeatherServiceMetNo()
+    weather_service.get_weather_data()
+    
+    aqi_service = AirQualityServiceWAQI()
+    aqi_service.get_aqi_data()
