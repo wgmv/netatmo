@@ -73,6 +73,7 @@ DEFAULT_FONT_FILE = os.path.join(BASE_DIR, 'assets', 'fonts', 'free-sans.ttf')
 
 DEFAULT_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'data.json')
 DEFAULT_WEATHER_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'weather_data.json')
+DEFAULT_AQI_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'aqi_data.json')
 DEFAULT_IMAGE_FILENAME = os.path.join(BASE_DIR, 'image.bmp')
 DEFAULT_SYMBOLS_DIR = os.path.join(BASE_DIR, 'assets', 'symbols')
 
@@ -108,6 +109,7 @@ class WeatherDisplay:
     def __init__(self, 
                  data_filename=DEFAULT_DATA_FILENAME,
                  weather_data_filename=DEFAULT_WEATHER_DATA_FILENAME,
+                 aqi_data_filename=DEFAULT_AQI_DATA_FILENAME,
                  image_filename=DEFAULT_IMAGE_FILENAME,
                  symbols_dir=DEFAULT_SYMBOLS_DIR,
                  image_width=DEFAULT_IMAGE_WIDTH,
@@ -118,6 +120,7 @@ class WeatherDisplay:
         Args:
             data_filename: Path to netatmo data JSON file
             weather_data_filename: Path to weather forecast JSON file
+            aqi_data_filename: Path to air quality data JSON file
             image_filename: Output image filename
             symbols_dir: Directory containing weather symbol images
             image_width: Width of output image in pixels
@@ -126,6 +129,7 @@ class WeatherDisplay:
         """
         self.data_filename = data_filename
         self.weather_data_filename = weather_data_filename
+        self.aqi_data_filename = aqi_data_filename
         self.image_filename = image_filename
         self.symbols_dir = symbols_dir
         self.image_width = image_width
@@ -151,6 +155,7 @@ class WeatherDisplay:
         # Data storage
         self.data = {}
         self.weather_data = {}
+        self.aqi_data = {}
         self.image = None
 
     def _load_data(self):
@@ -183,6 +188,16 @@ class WeatherDisplay:
         if "properties" not in self.weather_data:
             displayLogger.error("Bad weather data format")
             return False
+        
+        # Read AQI data (optional)
+        if os.path.isfile(self.aqi_data_filename):
+            self.aqi_data = utils.read_json(self.aqi_data_filename)
+            if self.aqi_data.get('status') != 'ok':
+                displayLogger.warning("AQI data status not ok")
+                self.aqi_data = {}
+        else:
+            displayLogger.info("No AQI data file (optional)")
+            self.aqi_data = {}
         
         return True
     
@@ -413,6 +428,13 @@ class WeatherDisplay:
         self._draw_weather_symbol('humidity', right_x + 50, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
 
         draw.text((right_x + 60, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_small, stroke_width=.6)
+        
+        # Draw AQI if available
+        if self.aqi_data and 'data' in self.aqi_data:
+            aqi_value = self.aqi_data.get('data', {}).get('aqi', None)
+            if aqi_value is not None:
+                aqi_str = f"AQI: {aqi_value}"
+                draw.text((right_x + 150, top_y + (3 * height_temp)), aqi_str, fill=BLACK, font=font_small, stroke_width=.6)
         
     def _get_forecast_data(self, current_outdoor_temp=None):
         """Extract weather forecast data from instant section for each hour.
