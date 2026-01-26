@@ -1,0 +1,16 @@
+[Unit]
+Description=Netatmo Weather Display Service
+After=network.target
+
+[Service]
+Type=forking
+User=wav
+WorkingDirectory=/home/wav/netatmo
+ExecStart=/bin/bash /home/wav/netatmo/scripts/launcher.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
