@@ -61,6 +61,7 @@ class NetatmoService:
         self.reader = reader.DataReader(DATA_FILENAME)
         self.console_formatter = formatters.NetatmoConsoleFormatter()
         self.weather_service = weather.WeatherServiceMetNo()
+        self.air_quality_service = weather.AirQualityServiceWAQI()
         self.last_weather_fetch = 0
         self.weather_interval = 3600  # Fetch weather every 60 minutes
 
@@ -228,8 +229,9 @@ class NetatmoService:
                     # Fetch weather data if needed (every 60 minutes)
                     current_time = time.time()
                     if current_time - self.last_weather_fetch >= self.weather_interval:
-                        netatmoLogger.info("Fetching new weather data.")
+                        netatmoLogger.info("Fetching new weather and air quality data.")
                         self.weather_service.get_weather_data()
+                        self.air_quality_service.get_aqi_data()
                         self.last_weather_fetch = current_time
                     
                     # Update display
