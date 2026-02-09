@@ -749,20 +749,26 @@ class WeatherDisplay:
                 black_image = self.image
                 red_image = Image.new('1', (self.image_width, self.image_height), WHITE)
                 
-                if do_full_refresh or not hasattr(self.epd, 'DisplayPartial'):
+                if do_full_refresh:
                     self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
                 elif hasattr(self.epd, 'DisplayPartial'):
                     self.epd.DisplayPartial(self.epd.getbuffer(black_image))
                 elif hasattr(self.epd, 'displayPartial'):
                     self.epd.displayPartial(self.epd.getbuffer(black_image))
+                else:
+                    # No partial refresh method available, use full refresh
+                    self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
             else:
                 # 2-color displays (black and white only)
-                if do_full_refresh or not hasattr(self.epd, 'DisplayPartial'):
+                if do_full_refresh:
                     self.epd.display(self.epd.getbuffer(self.image))
                 elif hasattr(self.epd, 'DisplayPartial'):
                     self.epd.DisplayPartial(self.epd.getbuffer(self.image))
                 elif hasattr(self.epd, 'displayPartial'):
                     self.epd.displayPartial(self.epd.getbuffer(self.image))
+                else:
+                    # No partial refresh method available, use full refresh
+                    self.epd.display(self.epd.getbuffer(self.image))
             
             self.epd.sleep()
             refresh_type = "full" if do_full_refresh else "partial"
