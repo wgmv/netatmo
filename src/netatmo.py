@@ -62,6 +62,7 @@ class NetatmoService:
         self.console_formatter = formatters.NetatmoConsoleFormatter()
         self.weather_service = weather.WeatherServiceMetNo()
         self.air_quality_service = weather.AirQualityServiceWAQI()
+        self.sunrise_service = weather.SunriseServiceMetNo()
         self.last_weather_fetch = 0
         self.weather_interval = 3600  # Fetch weather every 60 minutes
 
@@ -232,6 +233,7 @@ class NetatmoService:
                         netatmoLogger.info("Fetching new weather and air quality data.")
                         self.weather_service.get_weather_data()
                         self.air_quality_service.get_aqi_data()
+                        self.sunrise_service.get_sunrise_data()
                         self.last_weather_fetch = current_time
                     
                     # Update display

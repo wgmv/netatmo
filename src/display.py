@@ -74,6 +74,7 @@ DEFAULT_FONT_FILE = os.path.join(BASE_DIR, 'assets', 'fonts', 'free-sans.ttf')
 DEFAULT_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'data.json')
 DEFAULT_WEATHER_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'weather_data.json')
 DEFAULT_AQI_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'aqi_data.json')
+DEFAULT_SUNRISE_DATA_FILENAME = os.path.join(BASE_DIR, 'data', 'sunrise_data.json')
 DEFAULT_IMAGE_FILENAME = os.path.join(BASE_DIR, 'image.bmp')
 DEFAULT_SYMBOLS_DIR = os.path.join(BASE_DIR, 'assets', 'symbols')
 
@@ -106,10 +107,11 @@ displayLogger = logging.getLogger(__name__)
 class WeatherDisplay:
     """Class to handle weather display rendering"""
     
-    def __init__(self, 
+    def __init__(self,
                  data_filename=DEFAULT_DATA_FILENAME,
                  weather_data_filename=DEFAULT_WEATHER_DATA_FILENAME,
                  aqi_data_filename=DEFAULT_AQI_DATA_FILENAME,
+                 sunrise_data_filename=DEFAULT_SUNRISE_DATA_FILENAME,
                  image_filename=DEFAULT_IMAGE_FILENAME,
                  symbols_dir=DEFAULT_SYMBOLS_DIR,
                  image_width=DEFAULT_IMAGE_WIDTH,
@@ -130,6 +132,7 @@ class WeatherDisplay:
         self.data_filename = data_filename
         self.weather_data_filename = weather_data_filename
         self.aqi_data_filename = aqi_data_filename
+        self.sunrise_data_filename = sunrise_data_filename
         self.image_filename = image_filename
         self.symbols_dir = symbols_dir
         self.image_width = image_width
@@ -156,6 +159,7 @@ class WeatherDisplay:
         self.data = {}
         self.weather_data = {}
         self.aqi_data = {}
+        self.sunrise_data = {}
         self.image = None
 
     def _load_data(self):
@@ -198,7 +202,14 @@ class WeatherDisplay:
         else:
             displayLogger.info("No AQI data file (optional)")
             self.aqi_data = {}
-        
+
+        # Read sunrise data (optional)
+        if os.path.isfile(self.sunrise_data_filename):
+            self.sunrise_data = utils.read_json(self.sunrise_data_filename)
+        else:
+            displayLogger.info("No sunrise data file (optional)")
+            self.sunrise_data = {}
+
         return True
     
     def _get_units(self):
@@ -686,8 +697,63 @@ class WeatherDisplay:
         
         # Draw graph border
         # draw.rectangle([(graph_left, graph_top), (graph_right, graph_bottom)], outline=BLACK, width=2)
+
+        # Draw nighttime bar below time labels
+        self._draw_night_bar(draw, forecast_data, graph_left, graph_bottom, hour_to_x)
     
     
+    def _draw_night_bar(self, draw, forecast_data, graph_left, graph_bottom, hour_to_x):
+        """Draw a thin bar below the forecast x-axis showing nighttime (black) and daytime (white) periods.
+
+        Also draws a small label with sunrise, sunset, and daylight duration for today.
+        """
+        if not forecast_data:
+            return
+
+        bar_top = graph_bottom + 30
+        bar_height = 8
+        bar_bottom = bar_top + bar_height
+
+        font_tiny = ImageFont.truetype(DEFAULT_FONT_FILE, 14)
+
+        # Build a lookup: datetime -> is_nighttime
+        def _is_night(dt):
+            date_str = dt.strftime('%Y-%m-%d')
+            day_data = self.sunrise_data.get(date_str)
+            if not day_data or not day_data.get('sunrise') or not day_data.get('sunset'):
+                return False  # No data — assume daytime
+            rise = datetime.strptime(f"{date_str} {day_data['sunrise']}", '%Y-%m-%d %H:%M').replace(tzinfo=dt.tzinfo)
+            sett = datetime.strptime(f"{date_str} {day_data['sunset']}", '%Y-%m-%d %H:%M').replace(tzinfo=dt.tzinfo)
+            return dt < rise or dt >= sett
+
+        # Draw one rectangle per forecast hour segment
+        for i in range(len(forecast_data) - 1):
+            x0 = hour_to_x(i)
+            x1 = hour_to_x(i + 1)
+            dt = datetime.fromisoformat(forecast_data[i]['time'])
+            if _is_night(dt):
+                draw.rectangle([(x0, bar_top), (x1, bar_bottom)], fill=BLACK)
+
+        # Also shade from graph_left up to the first point if that hour is night
+        dt0 = datetime.fromisoformat(forecast_data[0]['time'])
+        if _is_night(dt0):
+            draw.rectangle([(graph_left, bar_top), (hour_to_x(0), bar_bottom)], fill=BLACK)
+
+        # Draw bar outline
+        draw.rectangle([(graph_left, bar_top), (hour_to_x(len(forecast_data) - 1), bar_bottom)], outline=BLACK, width=1)
+
+        # Sunrise/sunset label for today
+        today_str = datetime.fromisoformat(forecast_data[0]['time']).strftime('%Y-%m-%d')
+        day_data = self.sunrise_data.get(today_str)
+        if day_data and day_data.get('sunrise') and day_data.get('sunset'):
+            rise_hm = day_data['sunrise']
+            sett_hm = day_data['sunset']
+            rise = datetime.strptime(rise_hm, '%H:%M')
+            sett = datetime.strptime(sett_hm, '%H:%M')
+            daylight_min = int((sett - rise).total_seconds() / 60)
+            label = f"\u2191{rise_hm}  \u2193{sett_hm}  {daylight_min // 60}h {daylight_min % 60}m"
+            draw.text((graph_left, bar_bottom + 2), label, fill=BLACK, font=font_tiny)
+
     def _init_screen(self):
         """Initialize the e-paper display based on screen_type
         

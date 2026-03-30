@@ -3,6 +3,7 @@
 import os
 import logging
 import requests
+from datetime import datetime, timedelta, timezone
 import utils
 
 # Get the directory where this script is located
@@ -119,9 +120,80 @@ class AirQualityServiceWAQI:
             weatherLogger.error("get_aqi_data() RequestException:", exc_info=1)
 
 
+class SunriseServiceMetNo:
+    """Service for fetching sunrise/sunset data from met.no Sunrise API v3."""
+
+    def __init__(self, config_filename=None, sunrise_data_filename=None):
+        self.config_filename = config_filename or os.path.join(CONFIG_DIR, "config.json")
+        self.sunrise_data_filename = sunrise_data_filename or os.path.join(DATA_DIR, "sunrise_data.json")
+
+    def get_sunrise_data(self, debug=False):
+        """Fetches sunrise/sunset times for today and tomorrow (UTC). Result: sunrise_data.json."""
+        config = utils.read_json(self.config_filename)
+        lat = round(config['location']['latitude'], 4)
+        lon = round(config['location']['longitude'], 4)
+
+        today = datetime.now(timezone.utc).date()
+        dates = [today, today + timedelta(days=1)]
+        results = {}
+
+        for date in dates:
+            date_str = date.isoformat()
+            # Build URL manually to avoid '+' being percent-encoded as %2B which some servers reject
+            url = (
+                f"https://api.met.no/weatherapi/sunrise/3.0/sun"
+                f"?lat={lat}&lon={lon}&date={date_str}&offset=+00:00"
+            )
+            try:
+                response = requests.get(
+                    url,
+                    headers={"User-Agent": "wgmv-weather/1.0"},
+                    timeout=30
+                )
+                if debug:
+                    weatherLogger.info("GET %s  →  %d", response.url, response.status_code)
+                    weatherLogger.info("Response body: %s", response.text[:500])
+                response.raise_for_status()
+                data = response.json()
+                if debug:
+                    weatherLogger.info("Parsed JSON keys at root: %s", list(data.keys()))
+                    weatherLogger.info("properties keys: %s", list(data.get('properties', {}).keys()))
+                props = data.get('properties', {})
+                sunrise_iso = props.get('sunrise', {}).get('time', '')
+                sunset_iso = props.get('sunset', {}).get('time', '')
+                # Parse ISO 8601 and store as HH:MM UTC strings
+                sunrise_utc = datetime.fromisoformat(sunrise_iso).strftime('%H:%M') if sunrise_iso else None
+                sunset_utc = datetime.fromisoformat(sunset_iso).strftime('%H:%M') if sunset_iso else None
+                results[date_str] = {'sunrise': sunrise_utc, 'sunset': sunset_utc}
+                weatherLogger.info("Sunrise data for %s: sunrise=%s sunset=%s", date_str, sunrise_utc, sunset_utc)
+            except requests.exceptions.HTTPError as e:
+                weatherLogger.warning("get_sunrise_data() HTTPError for %s: %d %s",
+                                      date_str, e.response.status_code, e.response.text)
+            except requests.exceptions.RequestException:
+                weatherLogger.error("get_sunrise_data() RequestException for %s:", date_str, exc_info=1)
+            except (KeyError, ValueError) as e:
+                weatherLogger.error("get_sunrise_data() failed to parse response for %s: %s", date_str, e)
+
+        if results:
+            utils.write_json(results, self.sunrise_data_filename)
+        else:
+            weatherLogger.warning("get_sunrise_data() produced no results — sunrise_data.json not written")
+
+    @staticmethod
+    def calculate_daylight_minutes(sunrise_hhmm, sunset_hhmm):
+        """Returns the number of daylight minutes between sunrise and sunset (UTC HH:MM strings)."""
+        fmt = '%H:%M'
+        rise = datetime.strptime(sunrise_hhmm, fmt)
+        sett = datetime.strptime(sunset_hhmm, fmt)
+        return int((sett - rise).total_seconds() / 60)
+
+
 if __name__ == '__main__':
     weather_service = WeatherServiceMetNo()
     weather_service.get_weather_data()
-    
+
     aqi_service = AirQualityServiceWAQI()
     aqi_service.get_aqi_data()
+
+    sunrise_service = SunriseServiceMetNo()
+    sunrise_service.get_sunrise_data(debug=True)
