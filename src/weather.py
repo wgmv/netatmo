@@ -2,8 +2,8 @@
 
 import os
 import logging
+from datetime import datetime, timedelta
 import requests
-from datetime import datetime, timedelta, timezone
 import utils
 
 # Get the directory where this script is located
@@ -128,12 +128,16 @@ class SunriseServiceMetNo:
         self.sunrise_data_filename = sunrise_data_filename or os.path.join(DATA_DIR, "sunrise_data.json")
 
     def get_sunrise_data(self, debug=False):
-        """Fetches sunrise/sunset times for today and tomorrow (UTC). Result: sunrise_data.json."""
+        """Fetches sunrise/sunset times for today and tomorrow (local time). Result: sunrise_data.json."""
         config = utils.read_json(self.config_filename)
         lat = round(config['location']['latitude'], 4)
         lon = round(config['location']['longitude'], 4)
 
-        today = datetime.now(timezone.utc).date()
+        # Use local date and offset so stored times match the local timezone (consistent with forecast data)
+        local_now = datetime.now().astimezone()
+        local_offset_raw = local_now.strftime('%z')  # e.g. '+0200'
+        local_offset = f"{local_offset_raw[:3]}:{local_offset_raw[3:]}"  # e.g. '+02:00'
+        today = local_now.date()
         dates = [today, today + timedelta(days=1)]
         results = {}
 
@@ -142,7 +146,7 @@ class SunriseServiceMetNo:
             # Build URL manually to avoid '+' being percent-encoded as %2B which some servers reject
             url = (
                 f"https://api.met.no/weatherapi/sunrise/3.0/sun"
-                f"?lat={lat}&lon={lon}&date={date_str}&offset=+00:00"
+                f"?lat={lat}&lon={lon}&date={date_str}&offset={local_offset}"
             )
             try:
                 response = requests.get(
@@ -161,11 +165,11 @@ class SunriseServiceMetNo:
                 props = data.get('properties', {})
                 sunrise_iso = props.get('sunrise', {}).get('time', '')
                 sunset_iso = props.get('sunset', {}).get('time', '')
-                # Parse ISO 8601 and store as HH:MM UTC strings
-                sunrise_utc = datetime.fromisoformat(sunrise_iso).strftime('%H:%M') if sunrise_iso else None
-                sunset_utc = datetime.fromisoformat(sunset_iso).strftime('%H:%M') if sunset_iso else None
-                results[date_str] = {'sunrise': sunrise_utc, 'sunset': sunset_utc}
-                weatherLogger.info("Sunrise data for %s: sunrise=%s sunset=%s", date_str, sunrise_utc, sunset_utc)
+                # Parse ISO 8601 and store as local HH:MM strings
+                sunrise_local = datetime.fromisoformat(sunrise_iso).strftime('%H:%M') if sunrise_iso else None
+                sunset_local = datetime.fromisoformat(sunset_iso).strftime('%H:%M') if sunset_iso else None
+                results[date_str] = {'sunrise': sunrise_local, 'sunset': sunset_local}
+                weatherLogger.info("Sunrise data for %s: sunrise=%s sunset=%s (offset %s)", date_str, sunrise_local, sunset_local, local_offset)
             except requests.exceptions.HTTPError as e:
                 weatherLogger.warning("get_sunrise_data() HTTPError for %s: %d %s",
                                       date_str, e.response.status_code, e.response.text)
