@@ -716,7 +716,9 @@ class WeatherDisplay:
 
         font_tiny = ImageFont.truetype(DEFAULT_FONT_FILE, 14)
 
-        # Build a lookup: datetime -> is_nighttime
+        # Parse all forecast datetimes once
+        times = [datetime.fromisoformat(f['time']) for f in forecast_data]
+
         def _is_night(dt):
             date_str = dt.strftime('%Y-%m-%d')
             day_data = self.sunrise_data.get(date_str)
@@ -726,18 +728,36 @@ class WeatherDisplay:
             sett = datetime.strptime(f"{date_str} {day_data['sunset']}", '%Y-%m-%d %H:%M').replace(tzinfo=dt.tzinfo)
             return dt < rise or dt >= sett
 
-        # Draw one rectangle per forecast hour segment
-        for i in range(len(forecast_data) - 1):
-            x0 = hour_to_x(i)
-            x1 = hour_to_x(i + 1)
-            dt = datetime.fromisoformat(forecast_data[i]['time'])
-            if _is_night(dt):
-                draw.rectangle([(x0, bar_top), (x1, bar_bottom)], fill=BLACK)
+        def time_to_x(target_dt):
+            """Interpolate x coordinate for a datetime within the forecast range."""
+            for i in range(len(times) - 1):
+                if times[i] <= target_dt <= times[i + 1]:
+                    frac = (target_dt - times[i]).total_seconds() / (times[i + 1] - times[i]).total_seconds()
+                    return hour_to_x(i) + frac * (hour_to_x(i + 1) - hour_to_x(i))
+            return None
 
-        # Also shade from graph_left up to the first point if that hour is night
-        dt0 = datetime.fromisoformat(forecast_data[0]['time'])
-        if _is_night(dt0):
-            draw.rectangle([(graph_left, bar_top), (hour_to_x(0), bar_bottom)], fill=BLACK)
+        # Build a sorted list of event times: forecast hours + exact sunrise/sunset moments
+        event_times = list(times)
+        tzinfo = times[0].tzinfo
+        for date_str in sorted({t.strftime('%Y-%m-%d') for t in times}):
+            day_data = self.sunrise_data.get(date_str)
+            if day_data:
+                for key in ('sunrise', 'sunset'):
+                    hm = day_data.get(key)
+                    if hm:
+                        evt = datetime.strptime(f"{date_str} {hm}", '%Y-%m-%d %H:%M').replace(tzinfo=tzinfo)
+                        if times[0] <= evt <= times[-1]:
+                            event_times.append(evt)
+        event_times.sort()
+
+        # Draw one rectangle per event interval, coloured by the midpoint's night status
+        for i in range(len(event_times) - 1):
+            t_mid = event_times[i] + (event_times[i + 1] - event_times[i]) / 2
+            if _is_night(t_mid):
+                x0 = time_to_x(event_times[i])
+                x1 = time_to_x(event_times[i + 1])
+                if x0 is not None and x1 is not None:
+                    draw.rectangle([(int(x0), bar_top), (int(x1), bar_bottom)], fill=BLACK)
 
         # Draw bar outline
         draw.rectangle([(graph_left, bar_top), (hour_to_x(len(forecast_data) - 1), bar_bottom)], outline=BLACK, width=1)
