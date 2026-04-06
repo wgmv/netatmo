@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import time
+from datetime import datetime
 
 import requests
 
@@ -49,6 +50,12 @@ TOKEN_DEFAULT = {
     "refresh_token": "xxxx"
 }
 REFRESH_TIME_DEFAULT = 600   # default 10 minutes
+NIGHT_REFRESH_TIME = 1800    # 30 minutes during night hours (22:00–04:00)
+
+
+def _is_night():
+    hour = datetime.now().hour
+    return hour >= 22 or hour < 4
 
 
 class NetatmoService:
@@ -65,6 +72,7 @@ class NetatmoService:
         self.sunrise_service = weather.SunriseServiceMetNo()
         self.last_weather_fetch = 0
         self.weather_interval = 3600  # Fetch weather every 60 minutes
+        self.weather_display = None   # Created once in run() after config is loaded
 
     def get_new_token_info(self):
         """Instruct the user to authenticate on the dev portal and get a new token."""
@@ -212,7 +220,10 @@ class NetatmoService:
         self.check_config()
 
         netatmoLogger.info("Starting NetAtmo service with %d seconds refresh time.", self.config['refresh_time'])
-        
+
+        screen_type = self.config.get('screen_type', None)
+        self.weather_display = display.WeatherDisplay(screen_type=screen_type)
+
         try:
             while True:
                 try:
@@ -226,7 +237,7 @@ class NetatmoService:
                         formatted = self.reader.display(self.console_formatter)
                         if formatted:
                             netatmoLogger.info(formatted)
-                    
+
                     # Fetch weather data if needed (every 60 minutes)
                     current_time = time.time()
                     if current_time - self.last_weather_fetch >= self.weather_interval:
@@ -235,17 +246,24 @@ class NetatmoService:
                         self.air_quality_service.get_aqi_data()
                         self.sunrise_service.get_sunrise_data()
                         self.last_weather_fetch = current_time
-                    
+
                     # Update display
-                    display.main()
-                    
+                    self.weather_display.generate()
+
                 except Exception as e:
                     netatmoLogger.error("Error in main loop: %s", e, exc_info=True)
-                
-                # Sleep before next iteration
-                netatmoLogger.info("Sleeping for %d seconds...", self.config['refresh_time'])
-                time.sleep(self.config['refresh_time'])
-                
+
+                # During night hours sleep the display and wait longer between refreshes
+                if _is_night():
+                    self.weather_display.sleep_display()
+                    sleep_time = max(self.config['refresh_time'], NIGHT_REFRESH_TIME)
+                    netatmoLogger.info("Night mode: sleeping for %d seconds...", sleep_time)
+                else:
+                    sleep_time = self.config['refresh_time']
+                    netatmoLogger.info("Sleeping for %d seconds...", sleep_time)
+
+                time.sleep(sleep_time)
+
         except KeyboardInterrupt:
             netatmoLogger.info("Shutting down gracefully...")
 
