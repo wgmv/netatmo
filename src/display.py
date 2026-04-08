@@ -140,9 +140,6 @@ class WeatherDisplay:
         self.screen_type = screen_type
         self.epd = None
         self.units = {}  # Will be populated when data is loaded
-        self._refresh_count = 0  # Track partial refresh count for periodic full refresh
-        self._needs_init = True   # True when display needs init_partial before next partial refresh
-
         #Check/create symbols directory
         if not os.path.isfile(data_filename):
             displayLogger.error("No data file found: %s", data_filename)
@@ -806,73 +803,23 @@ class WeatherDisplay:
             displayLogger.error("Failed to initialize %s: %s", self.screen_type, e, exc_info=True)
             return None
     
-    def _display_on_screen(self, force_full_refresh=False):
-        """Display the image on the physical e-paper screen.
-
-        Stays awake between updates for fast partial refreshes.
-        Call sleep_display() explicitly when a longer pause is expected.
-
-        Args:
-            force_full_refresh: If True, force a full refresh instead of partial update
-        """
+    def _display_on_screen(self):
+        """Display the image on the physical e-paper screen using a full refresh."""
         if self.epd is None:
             return
 
         try:
-            # Full refresh every 10 partial updates to prevent ghosting
-            do_full_refresh = force_full_refresh or self._refresh_count >= 10
+            self.epd.init()
 
-            if do_full_refresh:
-                self.epd.init()
-                self._refresh_count = 0
-            elif self._needs_init:
-                # First partial after startup or after waking from sleep
-                if hasattr(self.epd, 'init_partial'):
-                    self.epd.init_partial()
-                elif hasattr(self.epd, 'Init_Partial'):
-                    self.epd.Init_Partial()
-                elif hasattr(self.epd, 'Init_4Gray'):
-                    self.epd.Init_4Gray()
-                self._needs_init = False
-
-            # Display the image
             if 'b' in self.screen_type.lower() and hasattr(self.epd, 'display'):
                 # 3-color displays need separate black and red images
                 black_image = self.image
                 red_image = Image.new('1', (self.image_width, self.image_height), WHITE)
-
-                if do_full_refresh:
-                    self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
-                elif hasattr(self.epd, 'DisplayPartial'):
-                    self.epd.DisplayPartial(self.epd.getbuffer(black_image))
-                elif hasattr(self.epd, 'displayPartial'):
-                    self.epd.displayPartial(self.epd.getbuffer(black_image))
-                else:
-                    self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
+                self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
             else:
-                # 2-color displays (black and white only)
-                if do_full_refresh:
-                    self.epd.display(self.epd.getbuffer(self.image))
-                elif hasattr(self.epd, 'DisplayPartial'):
-                    self.epd.DisplayPartial(self.epd.getbuffer(self.image))
-                elif hasattr(self.epd, 'displayPartial'):
-                    self.epd.displayPartial(self.epd.getbuffer(self.image))
-                else:
-                    self.epd.display(self.epd.getbuffer(self.image))
+                self.epd.display(self.epd.getbuffer(self.image))
 
-            if do_full_refresh:
-                # Switch to partial mode right after full refresh so next update is fast
-                if hasattr(self.epd, 'init_partial'):
-                    self.epd.init_partial()
-                elif hasattr(self.epd, 'Init_Partial'):
-                    self.epd.Init_Partial()
-                self._needs_init = False
-            else:
-                self._refresh_count += 1
-
-            refresh_type = "full" if do_full_refresh else "partial"
-            displayLogger.info("Image displayed on %s (%s refresh, count=%d)",
-                               self.screen_type, refresh_type, self._refresh_count)
+            displayLogger.info("Image displayed on %s (full refresh)", self.screen_type)
 
         except Exception as e:
             displayLogger.error("Failed to display on %s: %s", self.screen_type, e, exc_info=True)
@@ -885,35 +832,31 @@ class WeatherDisplay:
         """
         if self.epd is not None and hasattr(self.epd, 'sleep'):
             self.epd.sleep()
-            self._needs_init = True
             displayLogger.info("Display sleeping.")
     
-    def generate(self, force_full_refresh=False):
+    def generate(self):
         """Generate the complete weather display image
-        
+
         This is the main method to create and save the display
-        
-        Args:
-            force_full_refresh: If True, force a full screen refresh instead of partial update
         """
         # Initialize screen if specified (no-op after first call)
         screen_size = self._init_screen()
         if screen_size:
             self.image_width, self.image_height = screen_size
-        
+
         # Create blank image
         self.image = Image.new('1', (self.image_width, self.image_height), WHITE)
-        
+
         # Draw the weather data
         self.draw_image()
-        
+
         # Save the result
         self.image.save(self.image_filename)
         displayLogger.info("Image saved to %s", self.image_filename)
-        
+
         # Display on physical screen if available
         if self.epd is not None:
-            self._display_on_screen(force_full_refresh)
+            self._display_on_screen()
 
 
 def main():
