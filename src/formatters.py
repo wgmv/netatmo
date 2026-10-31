@@ -90,3 +90,7 @@ class NetatmoConsoleFormatter:
         if "Temperature" in dashboard:
             return [f"{module_name} {dashboard['Temperature']}"]
         return []
+
+
+if __name__ == '__main__':
+    print(NetatmoConsoleFormatter().format(utils.read_json("data/data.json")))

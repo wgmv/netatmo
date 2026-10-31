@@ -15,10 +15,6 @@ display.generate()
 display = WeatherDisplay(screen_type='epd2in7')
 display.generate()
 
-# With Waveshare 5.83" e-paper display:
-display = WeatherDisplay(screen_type='epd5in83b_V2')
-display.generate()
-
 # Custom configuration:
 display = WeatherDisplay(
     data_filename='custom/data.json',
@@ -30,6 +26,9 @@ display = WeatherDisplay(
     screen_type='epd5in83b_V2'
 )
 display.generate()
+
+# Station data that is already in memory can be passed directly (skips reading data.json):
+display.generate(station_data=data)
 
 # Configure via config.json by adding "screen_type" field:
 # {
@@ -45,29 +44,25 @@ display.generate()
 # - 'epd5in83b_V2': Waveshare 5.83" e-paper HAT V2 (B/W/R)
 """
 
-import os
-import logging
-import sys
+import hashlib
 import importlib
+import logging
+import os
+import sys
+import time
 from datetime import datetime
+from functools import lru_cache
 
-from PIL import Image
-from PIL import ImageDraw
-from PIL import ImageFont
-from PIL import ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 import utils
 
-# Get the directory where this script is located
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Parent directory (project root)
+BASE_DIR = utils.BASE_DIR
 
 # Constants
 WHITE = 1
 BLACK = 0
 RED = 2
-
-CELSIUS_TO_KELVIN = 273.15
 
 DEFAULT_FONT_FILE = os.path.join(BASE_DIR, 'assets', 'fonts', 'free-sans.ttf')
 
@@ -84,14 +79,21 @@ DEFAULT_IMAGE_HEIGHT = 480
 FONT_SIZE_TEXT = 28
 FONT_SIZE_TEMP = 51
 FONT_SIZE_TIME = 18
+FONT_SIZE_SMALL = 20
+
+BATTERY_LABEL = 'Bateria'
+STALE_DATA_SECONDS = 30 * 60   # station data older than this is flagged on the display
+FORECAST_HOURS = 24
+
+# E-paper refresh policy: a refresh flashes the whole panel, so skip it when the picture is
+# unchanged, but still redraw now and then to clear ghosting.
+FORCE_REFRESH_SECONDS = 6 * 60 * 60
 
 TREND_SYMBOLS = {
-    'up': '\u2197',     # ↗
-    'down': '\u2198',   # ↘
-    'stable': '\u2192'  # →
+    'up': '↗',     # ↗
+    'down': '↘',   # ↘
+    'stable': '→'  # →
 }
-
-WEATHER_SYMBOL_SIZE = (100, 100)
 
 # Unit options based on Netatmo API settings
 UNIT_OPTIONS = {
@@ -104,9 +106,50 @@ UNIT_OPTIONS = {
 displayLogger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=None)
+def get_font(size):
+    """Return the default font at the given size (loaded once per size)."""
+    return ImageFont.truetype(DEFAULT_FONT_FILE, size)
+
+
+@lru_cache(maxsize=256)
+def load_symbol(symbols_dir, symbol_code, size):
+    """Load a weather symbol, resized and colour-inverted. Cached per (dir, code, size).
+
+    Returns:
+        The prepared PIL image, or None if the symbol file does not exist.
+    """
+    symbol_path = os.path.join(symbols_dir, f"{symbol_code}.png")
+    if not os.path.isfile(symbol_path):
+        return None
+
+    symbol = Image.open(symbol_path).resize(size)
+
+    # Invert the symbol colors (black background, white symbols), keeping alpha
+    if symbol.mode == 'RGBA':
+        r, g, b, a = symbol.split()
+        r, g, b = ImageOps.invert(Image.merge('RGB', (r, g, b))).split()
+        return Image.merge('RGBA', (r, g, b, a))
+    if symbol.mode == 'RGB':
+        return ImageOps.invert(symbol)
+    # grayscale or binary images
+    return ImageOps.invert(symbol.convert('L'))
+
+
+def _unit(kind, index):
+    """Look up a unit string; fall back to the default unit for unknown settings."""
+    options = UNIT_OPTIONS[kind]
+    return options[index] if 0 <= index < len(options) else options[0]
+
+
+def _clock(date_str, hm, tzinfo):
+    """Build a datetime from a 'YYYY-MM-DD' date and an 'HH:MM' string in the given timezone."""
+    return datetime.strptime(f"{date_str} {hm}", '%Y-%m-%d %H:%M').replace(tzinfo=tzinfo)
+
+
 class WeatherDisplay:
     """Class to handle weather display rendering"""
-    
+
     def __init__(self,
                  data_filename=DEFAULT_DATA_FILENAME,
                  weather_data_filename=DEFAULT_WEATHER_DATA_FILENAME,
@@ -118,11 +161,12 @@ class WeatherDisplay:
                  image_height=DEFAULT_IMAGE_HEIGHT,
                  screen_type=None):
         """Initialize the WeatherDisplay
-        
+
         Args:
             data_filename: Path to netatmo data JSON file
             weather_data_filename: Path to weather forecast JSON file
             aqi_data_filename: Path to air quality data JSON file
+            sunrise_data_filename: Path to sunrise/sunset JSON file
             image_filename: Output image filename
             symbols_dir: Directory containing weather symbol images
             image_width: Width of output image in pixels
@@ -140,159 +184,100 @@ class WeatherDisplay:
         self.screen_type = screen_type
         self.epd = None
         self.units = {}  # Will be populated when data is loaded
-        #Check/create symbols directory
-        if not os.path.isfile(data_filename):
-            displayLogger.error("No data file found: %s", data_filename)
-            exit(1)
 
-        if not os.path.isfile(weather_data_filename):
-            displayLogger.error("No forecast data file found: %s", weather_data_filename)
-            exit(1)
-
-        if not os.path.isfile(DEFAULT_FONT_FILE):
-            displayLogger.error("No font file found: %s", DEFAULT_FONT_FILE)
-            exit(1)
-        
         # Data storage
         self.data = {}
         self.weather_data = {}
         self.aqi_data = {}
         self.sunrise_data = {}
         self.image = None
+        self.draw = None
 
-    def _load_data(self):
-        """Load data from JSON files
-        
+        # E-paper refresh state
+        self._asleep = False
+        self._last_image_hash = None
+        self._last_refresh = 0.0
+
+        if not os.path.isfile(DEFAULT_FONT_FILE):
+            raise FileNotFoundError(f"No font file found: {DEFAULT_FONT_FILE}")
+
+    # ------------------------------------------------------------------ data
+
+    def _read_optional(self, filename, label):
+        """Read an optional JSON file; returns {} if missing."""
+        if os.path.isfile(filename):
+            return utils.read_json(filename)
+        displayLogger.info("No %s file (optional)", label)
+        return {}
+
+    def _load_data(self, station_data=None):
+        """Load data from JSON files (or use the given station data)
+
+        Args:
+            station_data: Netatmo getstationsdata response already in memory
+
         Returns:
-            bool: True if data loaded successfully
+            bool: True if the required data is available
         """
-        # Read netatmo data
-        if os.path.isfile(self.data_filename):
+        if station_data:
+            self.data = station_data
+        elif os.path.isfile(self.data_filename):
             self.data = utils.read_json(self.data_filename)
         else:
-            displayLogger.error("No data file")
+            displayLogger.error("No data file found: %s", self.data_filename)
             return False
-        
-        if "body" not in self.data:
+
+        devices = self.data.get("body", {}).get("devices")
+        if not devices:
             displayLogger.error("Bad data format")
             return False
-        if "dashboard_data" not in self.data["body"]["devices"][0]:
+        if "dashboard_data" not in devices[0]:
             displayLogger.error("dashboard_data missing in data")
             return False
 
-        # Read weather data
-        if os.path.isfile(self.weather_data_filename):
-            self.weather_data = utils.read_json(self.weather_data_filename)
-        else:
-            displayLogger.error("No weather data file")
-            return False
-        
-        if "properties" not in self.weather_data:
+        # Forecast is optional: it may not have been fetched yet
+        self.weather_data = self._read_optional(self.weather_data_filename, "forecast data")
+        if self.weather_data and "properties" not in self.weather_data:
             displayLogger.error("Bad weather data format")
-            return False
-        
-        # Read AQI data (optional)
-        if os.path.isfile(self.aqi_data_filename):
-            self.aqi_data = utils.read_json(self.aqi_data_filename)
-            if self.aqi_data.get('status') != 'ok':
-                displayLogger.warning("AQI data status not ok")
-                self.aqi_data = {}
-        else:
-            displayLogger.info("No AQI data file (optional)")
+            self.weather_data = {}
+
+        self.aqi_data = self._read_optional(self.aqi_data_filename, "AQI data")
+        if self.aqi_data and self.aqi_data.get('status') != 'ok':
+            displayLogger.warning("AQI data status not ok")
             self.aqi_data = {}
 
-        # Read sunrise data (optional)
-        if os.path.isfile(self.sunrise_data_filename):
-            self.sunrise_data = utils.read_json(self.sunrise_data_filename)
-        else:
-            displayLogger.info("No sunrise data file (optional)")
-            self.sunrise_data = {}
-
+        self.sunrise_data = self._read_optional(self.sunrise_data_filename, "sunrise data")
         return True
-    
+
     def _get_units(self):
         """Extract units from user settings.
-        
+
         Returns:
             dict: Dictionary with unit strings for different measurements
         """
         user_admin = self.data["body"]["user"]["administrative"]
-        
+
         return {
-            'temp': UNIT_OPTIONS['temperature'][user_admin["unit"]],
-            'rain': UNIT_OPTIONS['rain'][user_admin["unit"]],
-            'wind': UNIT_OPTIONS['wind'][user_admin["windunit"]],
-            'pressure': UNIT_OPTIONS['pressure'][user_admin.get("pressureunit", 0)],
+            'temp': _unit('temperature', user_admin.get("unit", 0)),
+            'rain': _unit('rain', user_admin.get("unit", 0)),
+            'wind': _unit('wind', user_admin.get("windunit", 0)),
+            'pressure': _unit('pressure', user_admin.get("pressureunit", 0)),
             'humidity': '%',
             'co2': 'ppm'
         }
-    
-    def draw_image(self):
-        """Draw the weather display image"""
-        # Load data
-        if not self._load_data():
-            return
-        
-        # Prepare for drawing
-        draw = ImageDraw.Draw(self.image)
-        width, height = self.image.size
 
-        # Load fonts
-        font_text = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TEXT)
-        font_temp = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TEMP)
-        font_time = ImageFont.truetype(DEFAULT_FONT_FILE, FONT_SIZE_TIME)
-
-
-        # Get units from user settings
-        self.units = self._get_units()
-
-        # Extract sensor data
-        indoor_data = self._get_indoor_data()
-        outdoor_data = self._get_outdoor_data()
-        
-        # Get weather forecast data (normalized with current outdoor temperature)
-        current_temp = outdoor_data.get('temperature') if outdoor_data else None
-        forecast_data = self._get_forecast_data(current_temp)
-
-        # Calculate window positions
-        left_x = width // 9
-        right_x = width // 2 + width // 9
-        top_y = height // 6
-
-        # Draw layout structure
-        self._draw_layout(draw, width, height)
-
-        # Draw indoor data
-        self._draw_indoor_data(indoor_data, left_x, top_y, font_text, font_temp)
-        
-        # Draw outdoor data
-        self._draw_outdoor_data(outdoor_data, right_x, top_y, font_text, font_temp)
-        
-        # Draw time and battery
-        battery = self.data['body']['devices'][0]['modules'][0]['battery_percent']
-        data_time_str = f"{utils.timestr(self.data['time_server'])}"
-        battery_percent = f'Bateria: {battery} |'
-        (width_time, height_time) = utils.textsize(data_time_str, font=font_time)
-        (width_battery, height_battery) = utils.textsize(battery_percent, font=font_time)
-        draw.text((width - width_time - 25, 5), data_time_str, fill=BLACK, font=font_time, stroke_width=.35)
-        draw.text((width - width_time - width_battery - 30, 5), battery_percent, fill=BLACK, font=font_time, stroke_width=.35)
-
-        # Draw weather forecast
-        if forecast_data:
-            self._draw_forecast(forecast_data, width)
-    
     def _get_indoor_data(self):
         """Extract indoor sensor data
-        
+
         Returns:
             dict: Indoor sensor data with temperature, humidity, CO2, and trends
         """
         device = self.data["body"]["devices"][0]
         if "dashboard_data" not in device:
             return None
-            
+
         data = device["dashboard_data"]
-        
+
         return {
             'temperature': data.get("Temperature"),
             'humidity': data.get("Humidity"),
@@ -301,64 +286,10 @@ class WeatherDisplay:
             'pressure_trend': data.get("pressure_trend"),
             'name': device.get("module_name", "Indoor")
         }
-    
-    def _draw_indoor_data(self, indoor_data, left_x, top_y, font_text, font_temp):
-        """Draw indoor sensor data on the display
-        
-        Args:
-            indoor_data: Dictionary with indoor sensor values
-            left_x: X position for left text
-            right_x: X position for right text
-            top_y: Y position for top text
-            font_text: Font for regular text
-            font_temp: Font for temperature text
-        """
-        if not indoor_data:
-            return
-            
-        draw = ImageDraw.Draw(self.image)
-        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 20)  # Smaller font for humidity/CO2
 
-        # Format temperature
-        if indoor_data['temperature'] is not None:
-            indoor_temp_str = f"{indoor_data['temperature']:.1f} {self.units['temp']}"
-            if indoor_data['temp_trend']:
-                indoor_temp_str += TREND_SYMBOLS.get(indoor_data['temp_trend'], '')
-        else:
-            indoor_temp_str = 'N/A'
-        
-        # Format humidity
-        if indoor_data['humidity'] is not None:
-            indoor_humidity_str = f"{indoor_data['humidity']:.0f} {self.units['humidity']}"
-        else:
-            indoor_humidity_str = 'N/A'
-        
-        # Format CO2
-        if indoor_data['co2'] is not None:
-            indoor_co2_str = f"{indoor_data['co2']:.0f} {self.units['co2']}"
-            if indoor_data['pressure_trend']:
-                indoor_co2_str += TREND_SYMBOLS.get(indoor_data['pressure_trend'], '')
-        else:
-            indoor_co2_str = 'N/A'
-                    
-        # Calculate text height for positioning
-        (width_temp, height_temp) = utils.textsize(indoor_temp_str, font=font_temp)
-
-        #Draw module name
-        if indoor_data['name']:
-            draw.text((left_x, top_y - height_temp), indoor_data['name'], fill=BLACK, font=font_text)
-        
-        # Draw temperature
-        draw.text((left_x, top_y), indoor_temp_str, fill=BLACK, font=font_temp, stroke_width=.5)
-        
-        # Draw humidity and CO2
-        self._draw_weather_symbol('humidity', left_x - 32, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y + (3 * height_temp) + 30, top_y, symbol_size=(30, 30))
-        draw.text((left_x - 20, top_y + (3 * height_temp)),  f" {indoor_humidity_str}  CO₂: {indoor_co2_str}", fill=BLACK, font=font_small, stroke_width=.6)
-        
-    
     def _get_outdoor_data(self):
         """Extract outdoor sensor data
-        
+
         Returns:
             dict: Outdoor sensor data including temperature, humidity, rain, wind, and trends
         """
@@ -370,246 +301,255 @@ class WeatherDisplay:
             'wind': None,
             'name': None
         }
-        
-        device = self.data["body"]["devices"][0]
-        for module in device["modules"]:
+
+        for module in self.data["body"]["devices"][0].get("modules", []):
             if "dashboard_data" not in module:
                 continue
-                
+
             module_type = module["type"]
             data = module["dashboard_data"]
-            
+
             if module_type == "NAModule1":  # Outdoor Module
                 outdoor_data['temperature'] = data.get("Temperature")
                 outdoor_data['humidity'] = data.get("Humidity")
                 outdoor_data['temp_trend'] = data.get("temp_trend")
-                outdoor_data['name'] = module['module_name']
-                
+                outdoor_data['name'] = module.get('module_name')
+
             elif module_type == "NAModule2":  # Wind Gauge
                 outdoor_data['wind'] = data.get("WindStrength", 0)
-                
+
             elif module_type == "NAModule3":  # Rain Gauge
                 outdoor_data['rain'] = data.get("sum_rain_24", 0)
-        
+
         return outdoor_data
-    
+
+    def _get_battery_percent(self):
+        """Battery level of the outdoor module (falls back to the first module), or None."""
+        modules = self.data["body"]["devices"][0].get("modules", [])
+        outdoor = next((m for m in modules if m.get("type") == "NAModule1"), None)
+        module = outdoor or (modules[0] if modules else None)
+        return module.get("battery_percent") if module else None
+
+    def _get_forecast_data(self, current_outdoor_temp=None):
+        """Extract hourly forecast data (temperature and weather symbol).
+
+        If the current outdoor temperature is known, the forecast is shifted by the difference
+        between measurement and the first forecast value to correct for forecast bias.
+
+        Args:
+            current_outdoor_temp: Current measured outdoor temperature for normalization
+
+        Returns:
+            list: List of forecast dictionaries, or None if there is not enough data
+        """
+        timeseries = self.weather_data.get("properties", {}).get("timeseries", [])
+        if len(timeseries) < 10:
+            return None
+
+        offset = 0
+        if current_outdoor_temp is not None:
+            first_temp = timeseries[0]["data"]["instant"]["details"].get("air_temperature", 0)
+            offset = current_outdoor_temp - first_temp
+            displayLogger.info("Normalizing forecast: current=%.1f, forecast=%.1f, offset=%+.1f",
+                               current_outdoor_temp, first_temp, offset)
+
+        forecast_data = []
+        for forecast in timeseries[:FORECAST_HOURS]:
+            data = forecast["data"]
+
+            # Weather symbol from 3-hour forecast if available, fallback to 1-hour
+            symbol_code = None
+            for period in ("next_3_hours", "next_1_hours"):
+                if period in data:
+                    symbol_code = data[period]["summary"]["symbol_code"]
+                    break
+            if not symbol_code:
+                continue
+
+            temp = data["instant"]["details"].get("air_temperature", 0)
+            # Convert UTC time to local timezone
+            forecast_time = datetime.fromisoformat(forecast["time"].replace('Z', '+00:00'))
+
+            forecast_data.append({
+                'time': forecast_time.astimezone().isoformat(),
+                'symbol_code': symbol_code,
+                'temp': temp + offset
+            })
+
+        return forecast_data
+
+    # --------------------------------------------------------------- drawing
+
+    def draw_image(self, station_data=None):
+        """Draw the weather display image onto self.image
+
+        Returns:
+            bool: False if the data needed for drawing is not available
+        """
+        if not self._load_data(station_data):
+            return False
+
+        self.draw = ImageDraw.Draw(self.image)
+        width, height = self.image.size
+        font_text = get_font(FONT_SIZE_TEXT)
+        font_temp = get_font(FONT_SIZE_TEMP)
+
+        self.units = self._get_units()
+
+        indoor_data = self._get_indoor_data()
+        outdoor_data = self._get_outdoor_data()
+
+        # Forecast, normalized with current outdoor temperature
+        forecast_data = self._get_forecast_data(outdoor_data.get('temperature'))
+
+        # Calculate window positions
+        left_x = width // 9
+        right_x = width // 2 + width // 9
+        top_y = height // 6
+
+        self._draw_layout(width, height)
+        self._draw_indoor_data(indoor_data, left_x, top_y, font_text, font_temp)
+        self._draw_outdoor_data(outdoor_data, right_x, top_y, font_text, font_temp)
+        self._draw_header(width)
+
+        if forecast_data:
+            self._draw_forecast(forecast_data, width)
+        return True
+
+    def _draw_header(self, width):
+        """Draw battery level and the time of the station data (top right)."""
+        font_time = get_font(FONT_SIZE_TIME)
+        time_server = self.data['time_server']
+
+        data_time_str = utils.timestr(time_server)
+        if time.time() - time_server > STALE_DATA_SECONDS:
+            data_time_str = f"! {data_time_str}"  # station data is outdated
+        battery = self._get_battery_percent()
+        battery_str = f'{BATTERY_LABEL}: {battery if battery is not None else "N/A"} |'
+
+        width_time, _ = utils.textsize(data_time_str, font=font_time)
+        width_battery, _ = utils.textsize(battery_str, font=font_time)
+        self.draw.text((width - width_time - 25, 5), data_time_str, fill=BLACK, font=font_time, stroke_width=.35)
+        self.draw.text((width - width_time - width_battery - 30, 5), battery_str, fill=BLACK, font=font_time, stroke_width=.35)
+
+    @staticmethod
+    def _format_reading(value, unit, fmt, trend=None):
+        """Format a sensor value with unit and optional trend arrow; 'N/A' if missing."""
+        if value is None:
+            return 'N/A'
+        text = f"{value:{fmt}} {unit}"
+        if trend:
+            text += TREND_SYMBOLS.get(trend, '')
+        return text
+
+    def _draw_indoor_data(self, indoor_data, left_x, top_y, font_text, font_temp):
+        """Draw indoor sensor data on the display
+
+        Args:
+            indoor_data: Dictionary with indoor sensor values
+            left_x: X position for text
+            top_y: Y position for top text
+            font_text: Font for regular text
+            font_temp: Font for temperature text
+        """
+        if not indoor_data:
+            return
+
+        font_small = get_font(FONT_SIZE_SMALL)
+        units = self.units
+
+        temp_str = self._format_reading(indoor_data['temperature'], units['temp'], '.1f', indoor_data['temp_trend'])
+        humidity_str = self._format_reading(indoor_data['humidity'], units['humidity'], '.0f')
+        co2_str = self._format_reading(indoor_data['co2'], units['co2'], '.0f', indoor_data['pressure_trend'])
+
+        _, height_temp = utils.textsize(temp_str, font=font_temp)
+
+        if indoor_data['name']:
+            self.draw.text((left_x, top_y - height_temp), indoor_data['name'], fill=BLACK, font=font_text)
+
+        self.draw.text((left_x, top_y), temp_str, fill=BLACK, font=font_temp, stroke_width=.5)
+
+        # Humidity and CO2
+        self._paste_icon('humidity', left_x - 32, top_y + (3 * height_temp) - 5, (30, 30))
+        self.draw.text((left_x - 20, top_y + (3 * height_temp)), f" {humidity_str}  CO₂: {co2_str}",
+                       fill=BLACK, font=font_small, stroke_width=.6)
+
     def _draw_outdoor_data(self, outdoor_data, right_x, top_y, font_text, font_temp):
         """Draw outdoor sensor data on the display
-        
+
         Args:
             outdoor_data: Dictionary with outdoor sensor values
             right_x: X position for text
             top_y: Y position for top text
+            font_text: Font for regular text
             font_temp: Font for temperature text
         """
         if not outdoor_data:
             return
-            
-        draw = ImageDraw.Draw(self.image)
-        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 20)  # Smaller font for humidity/CO2
-        
-        # Format temperature
-        if outdoor_data['temperature'] is not None:
-            outdoor_temp_str = f"{outdoor_data['temperature']:.1f} {self.units['temp']}"
-            if outdoor_data['temp_trend']:
-                outdoor_temp_str += TREND_SYMBOLS.get(outdoor_data['temp_trend'], '')
-        else:
-            outdoor_temp_str = 'N/A'
 
-        # Format humidity
-        if outdoor_data['humidity'] is not None:
-            outdoor_humidity_str = f"{outdoor_data['humidity']:.0f} {self.units['humidity']}"
-        else:
-            outdoor_humidity_str = 'N/A'
+        font_small = get_font(FONT_SIZE_SMALL)
+        units = self.units
 
-        # Calculate text height for positioning
-        (width_temp, height_temp) = utils.textsize(outdoor_temp_str, font=font_temp)
+        temp_str = self._format_reading(outdoor_data['temperature'], units['temp'], '.1f', outdoor_data['temp_trend'])
+        humidity_str = self._format_reading(outdoor_data['humidity'], units['humidity'], '.0f')
 
-        #Draw module name
+        _, height_temp = utils.textsize(temp_str, font=font_temp)
+
         if outdoor_data['name']:
-            draw.text((right_x, top_y - height_temp), outdoor_data['name'], fill=BLACK, font=font_text)
-        
-        # Draw temperature
-        draw.text((right_x, top_y), outdoor_temp_str, fill=BLACK, font=font_temp, stroke_width=.5)
+            self.draw.text((right_x, top_y - height_temp), outdoor_data['name'], fill=BLACK, font=font_text)
 
-        # Draw humidity
-        self._draw_weather_symbol('humidity', right_x + 50, top_y + (3 * height_temp) + 30, top_y + (4 * height_temp), height_temp, top_y, top_y + (3 * height_temp) + 30, symbol_size=(30, 30))
+        self.draw.text((right_x, top_y), temp_str, fill=BLACK, font=font_temp, stroke_width=.5)
 
-        draw.text((right_x + 40, top_y + (3 * height_temp)), f" {outdoor_humidity_str}", fill=BLACK, font=font_small, stroke_width=.6)
-        
-        # Draw AQI if available
-        if self.aqi_data and 'data' in self.aqi_data:
-            aqi_value = self.aqi_data.get('data', {}).get('aqi', None)
-            if aqi_value is not None:
-                aqi_str = f"AQI: {aqi_value}"
-                draw.text((right_x + 140, top_y + (3 * height_temp)), aqi_str, fill=BLACK, font=font_small, stroke_width=.6)
-        
-    def _get_forecast_data(self, current_outdoor_temp=None):
-        """Extract weather forecast data from instant section for each hour.
-        
-        Normalizes forecast temperatures based on current outdoor measurement to correct
-        for forecast bias.
-        
-        Args:
-            current_outdoor_temp: Current measured outdoor temperature for normalization
-        
-        Returns:
-            list: List of forecast dictionaries with hourly temperature and 6-hour symbols
-        """
-        if "properties" not in self.weather_data:
-            return None
-        
-        timeseries = self.weather_data["properties"]["timeseries"]
-        if len(timeseries) < 10:
-            return None
-        
-        forecast_data = []
-        
-        # Calculate temperature offset for normalization (as percentage)
-        # Use Kelvin scale to avoid zero-crossing issues
-        
-        percent_offset = 0
-        forecast_error = 0
-        
-        if current_outdoor_temp is not None and len(timeseries) > 0:
-            # Get the first forecast temperature (current hour)
-            first_forecast_temp = timeseries[0]["data"]["instant"]["details"].get("air_temperature", 0)
-            forecast_error = current_outdoor_temp - first_forecast_temp
-            
-            # Convert to Kelvin for percentage calculation
-            current_kelvin = current_outdoor_temp + CELSIUS_TO_KELVIN
-            forecast_kelvin = first_forecast_temp + CELSIUS_TO_KELVIN
-            
-            # Calculate percentage offset on absolute scale
-            percent_offset = (current_kelvin - forecast_kelvin) / forecast_kelvin
-            
-            displayLogger.info("Normalizing forecast: current=%.1f°C, forecast=%.1f°C, "
-                             "error=%+.1f°C, offset=%+.2f%%",
-                             current_outdoor_temp, first_forecast_temp, 
-                             forecast_error, percent_offset * 100)
-        
-       
-        for index in range(0,24):
-            if index >= len(timeseries):
-                continue
-                
-            forecast = timeseries[index]
-            
-            # Get temperature from instant section (current hour)
-            instant_details = forecast["data"]["instant"]["details"]
-            temp = instant_details.get("air_temperature", 0)
-            
-            # Apply normalization offset (percentage-based using Kelvin scale)
-            if percent_offset != 0:
-                temp_kelvin = temp + CELSIUS_TO_KELVIN
-                normalized_kelvin = temp_kelvin * (1 + percent_offset)
-                normalized_temp = normalized_kelvin - CELSIUS_TO_KELVIN
-            else:
-                normalized_temp = temp
+        # Humidity
+        self._paste_icon('humidity', right_x + 50, top_y + (3 * height_temp) - 5, (30, 30))
+        self.draw.text((right_x + 40, top_y + (3 * height_temp)), f" {humidity_str}",
+                       fill=BLACK, font=font_small, stroke_width=.6)
 
-            
-            # Get weather symbol from 3-hour forecast if available, fallback to 1-hour
-            symbol_code = None
-            if "next_3_hours" in forecast["data"]:
-                symbol_code = forecast["data"]["next_3_hours"]["summary"]["symbol_code"]
-            elif "next_1_hours" in forecast["data"]:
-                symbol_code = forecast["data"]["next_1_hours"]["summary"]["symbol_code"]
-            
-            if symbol_code:
-                # Convert UTC time to local timezone
-                forecast_time = datetime.fromisoformat(forecast["time"].replace('Z', '+00:00'))
-                local_time = forecast_time.astimezone()
-                
-                forecast_data.append({
-                    'time': local_time.isoformat(),
-                    'symbol_code': symbol_code,
-                    'temp': normalized_temp,
-                    'original_temp': temp,
-                    'error': forecast_error if index == 0 else None
-                })
+        # AQI if available
+        aqi_value = self.aqi_data.get('data', {}).get('aqi')
+        if aqi_value is not None:
+            self.draw.text((right_x + 140, top_y + (3 * height_temp)), f"AQI: {aqi_value}",
+                           fill=BLACK, font=font_small, stroke_width=.6)
 
-        return forecast_data
-    
-    def _draw_layout(self, draw, width, height):
-        """Draw the basic layout structure
-        
-        Args:
-            draw: ImageDraw object
-            width: Image width
-            height: Image height
-        """
+    def _draw_layout(self, width, height):
+        """Draw the basic layout structure"""
         # Outer rectangle
-        draw.rectangle((2, 2, width - 2, height - 2), fill=WHITE, outline=BLACK)
-        
+        self.draw.rectangle((2, 2, width - 2, height - 2), fill=WHITE, outline=BLACK)
+
         # Main dividing lines
         mid_x = width // 2
         mid_y = height // 2
-        draw.line((mid_x, 2, mid_x, mid_y), fill=BLACK, width=2)
-        draw.line((2, mid_y, width - 2, mid_y), fill=BLACK, width=2)
+        self.draw.line((mid_x, 2, mid_x, mid_y), fill=BLACK, width=2)
+        self.draw.line((2, mid_y, width - 2, mid_y), fill=BLACK, width=2)
 
-        # # Bottom window divisions (5 equal sections)
-        # for i in range(1, 5):
-        #     x = i * width // 4
-        #     draw.line((x, mid_y, x, height - 2), fill=BLACK, width=2)
-    
-    def _draw_weather_symbol(self, symbol_code, x, label_y, y, text_height, graph_top, graph_bottom, symbol_size=(50, 50)):
-        """Draw a weather symbol at the specified position
-        
-        Args:
-            symbol_code: Weather symbol code (filename without .png)
-            x: X position for center of symbol
-            label_y: Y position of temperature label
-            y: Y position of curve point
-            text_height: Height of temperature text
-            graph_top: Top boundary of graph
-            graph_bottom: Bottom boundary of graph
-            symbol_size: Tuple of (width, height) for symbol size
+    def _paste_icon(self, symbol_code, x_center, y_top, size):
+        """Paste a weather symbol with its horizontal center at x_center and top edge at y_top."""
+        symbol = load_symbol(self.symbols_dir, symbol_code, tuple(size))
+        if symbol is not None:
+            self.image.paste(symbol, (x_center - size[0] // 2, y_top), mask=symbol)
+
+    def _draw_forecast_symbol(self, symbol_code, x, label_y, y, text_height, graph_top, graph_bottom, size):
+        """Draw a forecast symbol next to its temperature label.
+
+        The symbol goes above the label when the label sits above the curve point,
+        otherwise below it, and is kept inside the graph area.
         """
-        symbol_file = f"{symbol_code}.png"
-        symbol_path = os.path.join(self.symbols_dir, symbol_file)
-        
-        if os.path.isfile(symbol_path):
-            symbol = Image.open(symbol_path).resize(symbol_size)
-            
-            # Invert the symbol colors (black background, white symbols)
-            if symbol.mode == 'RGBA':
-                # For RGBA images, invert RGB channels but keep alpha
-                r, g, b, a = symbol.split()
-                rgb_image = Image.merge('RGB', (r, g, b))
-                inverted_rgb = ImageOps.invert(rgb_image)
-                r, g, b = inverted_rgb.split()
-                symbol = Image.merge('RGBA', (r, g, b, a))
-            elif symbol.mode == 'RGB':
-                symbol = ImageOps.invert(symbol)
-            elif symbol.mode == 'L' or symbol.mode == '1':
-                # For grayscale or binary images
-                symbol = ImageOps.invert(symbol.convert('L'))
-            
-            # Position symbol above the temperature label
-            symbol_x = x - symbol_size[0] // 2
-            symbol_y = label_y - symbol_size[1] - 5 if label_y < y else label_y + text_height + 5
-            
-            # Ensure symbol stays within bounds
-            symbol_y = max(graph_top - 50, min(symbol_y, graph_bottom - symbol_size[1]))
-            
-            self.image.paste(symbol, (symbol_x, symbol_y), mask=symbol)
-    
-    
+        symbol_y = label_y - size[1] - 5 if label_y < y else label_y + text_height + 5
+        symbol_y = max(graph_top - 50, min(symbol_y, graph_bottom - size[1]))
+        self._paste_icon(symbol_code, x, symbol_y, size)
+
     def _draw_forecast(self, forecast_data, width):
         """Draw weather forecast section as a temperature curve graph
-        
+
         Args:
             forecast_data: List of forecast dictionaries with hourly data
-            bottom_window_x: X position of bottom window
-            bottom_window_y: Y position of bottom window (not used, kept for compatibility)
             width: Image width
-            font_text: Font for text
         """
-        draw = ImageDraw.Draw(self.image)
-        
+        draw = self.draw
+
         if not forecast_data or len(forecast_data) < 2:
             return
-        
+
         # Graph dimensions and positioning
         graph_left = 50
         graph_right = width - 50
@@ -617,90 +557,63 @@ class WeatherDisplay:
         graph_bottom = self.image_height - 50
         graph_width = graph_right - graph_left
         graph_height = graph_bottom - graph_top
-        
-        # Extract temperatures for scaling
+
+        # Temperature range with 10% padding on each side
         temps = [f['temp'] for f in forecast_data]
         min_temp = min(temps)
         max_temp = max(temps)
         temp_range = max_temp - min_temp if max_temp != min_temp else 10
-        
-        # Add padding to temperature range (10% on each side)
         temp_padding = temp_range * 0.1
         min_temp -= temp_padding
         max_temp += temp_padding
         temp_range = max_temp - min_temp
-        
-        # Calculate x position for each hour
-        hours_shown = len(forecast_data)
-        x_step = graph_width / (hours_shown - 1) if hours_shown > 1 else graph_width
-        
-        # Helper function to convert temp to y coordinate
+
+        x_step = graph_width / (len(forecast_data) - 1)
+
         def temp_to_y(temp):
             # Invert y axis (higher temp = lower y)
-            normalized = (temp - min_temp) / temp_range
-            return int(graph_bottom - (normalized * graph_height))
-        
-        # Helper function to convert hour index to x coordinate
+            return int(graph_bottom - ((temp - min_temp) / temp_range * graph_height))
+
         def hour_to_x(hour_idx):
             return int(graph_left + (hour_idx * x_step))
-        
-        # Draw temperature curve
-        curve_points = []
+
+        curve_points = [(hour_to_x(i), temp_to_y(f['temp'])) for i, f in enumerate(forecast_data)]
+        draw.line(curve_points, fill=BLACK, width=5)
+
+        font_small = get_font(22)
+        font_tiny = get_font(16)
+
         for i, forecast in enumerate(forecast_data):
-            x = hour_to_x(i)
-            y = temp_to_y(forecast['temp'])
-            curve_points.append((x, y))
-        
-        # Draw the curve line
-        if len(curve_points) > 1:
-            draw.line(curve_points, fill=BLACK, width=5)
-        
-        # Draw markers and labels
-        font_small = ImageFont.truetype(DEFAULT_FONT_FILE, 22)
-        font_tiny = ImageFont.truetype(DEFAULT_FONT_FILE, 16)
-        
-        for i, forecast in enumerate(forecast_data):
-            x = hour_to_x(i)
-            y = temp_to_y(forecast['temp'])
-            
+            x, y = curve_points[i]
+
             # Mark every 3 hours on x-axis
             if (i + 1) % 3 == 0:
-                # Draw tick mark
                 draw.line([(x, graph_bottom), (x, graph_bottom + 5)], fill=BLACK, width=3)
-                
-                # Draw hour label
-                time_obj = datetime.fromisoformat(forecast['time'])
-                hour_str = time_obj.strftime('%H:%M')
+
+                hour_str = datetime.fromisoformat(forecast['time']).strftime('%H:%M')
                 text_bbox = draw.textbbox((0, 0), hour_str, font=font_tiny)
                 text_width = text_bbox[2] - text_bbox[0]
                 draw.text((x - text_width // 2, graph_bottom + 8), hour_str, fill=BLACK, font=font_tiny, stroke_width=.3)
+
             # Label every 6 hours with temp and weather symbol
-            if (i+1) % 6 == 0:
-                # Draw point on curve
+            if (i + 1) % 6 == 0:
                 draw.ellipse([(x - 5, y - 5), (x + 5, y + 5)], fill=BLACK, outline=BLACK)
-                
-                # Draw temperature label
+
                 temp_str = f"{forecast['temp']:.1f}{self.units['temp']}"
                 text_bbox = draw.textbbox((0, 0), temp_str, font=font_small)
                 text_width = text_bbox[2] - text_bbox[0]
                 text_height = text_bbox[3] - text_bbox[1]
-                
+
                 # Position text above or below point depending on space
                 label_y = y - text_height - 15 if y > graph_top + 60 else y + 15
                 draw.text((x - text_width // 2, label_y), temp_str, fill=BLACK, font=font_small)
-                
-                # Draw weather symbol
-                self._draw_weather_symbol(forecast['symbol_code'], x, label_y, y, text_height, 
-                                         graph_top, graph_bottom, symbol_size=(60, 60))
-        
-        # Draw graph border
-        # draw.rectangle([(graph_left, graph_top), (graph_right, graph_bottom)], outline=BLACK, width=2)
 
-        # Draw nighttime bar below time labels
-        self._draw_night_bar(draw, forecast_data, graph_left, graph_bottom, hour_to_x)
-    
-    
-    def _draw_night_bar(self, draw, forecast_data, graph_left, graph_bottom, hour_to_x):
+                self._draw_forecast_symbol(forecast['symbol_code'], x, label_y, y, text_height,
+                                           graph_top, graph_bottom, (60, 60))
+
+        self._draw_night_bar(forecast_data, graph_left, graph_bottom, hour_to_x)
+
+    def _draw_night_bar(self, forecast_data, graph_left, graph_bottom, hour_to_x):
         """Draw a thin bar below the forecast x-axis showing nighttime (black) and daytime (white) periods.
 
         Also draws a small label with sunrise, sunset, and daylight duration for today.
@@ -708,23 +621,26 @@ class WeatherDisplay:
         if not forecast_data:
             return
 
+        draw = self.draw
         bar_top = graph_bottom + 30
-        bar_height = 8
-        bar_bottom = bar_top + bar_height
+        bar_bottom = bar_top + 8
+        font_tiny = get_font(14)
 
-        font_tiny = ImageFont.truetype(DEFAULT_FONT_FILE, 14)
-
-        # Parse all forecast datetimes once
         times = [datetime.fromisoformat(f['time']) for f in forecast_data]
+        tzinfo = times[0].tzinfo
 
-        def _is_night(dt):
-            date_str = dt.strftime('%Y-%m-%d')
+        def sun_times(date_str):
+            """(sunrise, sunset) datetimes for a date, or None if unknown."""
             day_data = self.sunrise_data.get(date_str)
             if not day_data or not day_data.get('sunrise') or not day_data.get('sunset'):
+                return None
+            return _clock(date_str, day_data['sunrise'], tzinfo), _clock(date_str, day_data['sunset'], tzinfo)
+
+        def is_night(dt):
+            sun = sun_times(dt.strftime('%Y-%m-%d'))
+            if sun is None:
                 return False  # No data — assume daytime
-            rise = datetime.strptime(f"{date_str} {day_data['sunrise']}", '%Y-%m-%d %H:%M').replace(tzinfo=dt.tzinfo)
-            sett = datetime.strptime(f"{date_str} {day_data['sunset']}", '%Y-%m-%d %H:%M').replace(tzinfo=dt.tzinfo)
-            return dt < rise or dt >= sett
+            return dt < sun[0] or dt >= sun[1]
 
         def time_to_x(target_dt):
             """Interpolate x coordinate for a datetime within the forecast range."""
@@ -734,43 +650,32 @@ class WeatherDisplay:
                     return hour_to_x(i) + frac * (hour_to_x(i + 1) - hour_to_x(i))
             return None
 
-        # Build a sorted list of event times: forecast hours + exact sunrise/sunset moments
+        # Event times: forecast hours + exact sunrise/sunset moments
         event_times = list(times)
-        tzinfo = times[0].tzinfo
         for date_str in sorted({t.strftime('%Y-%m-%d') for t in times}):
-            day_data = self.sunrise_data.get(date_str)
-            if day_data:
-                for key in ('sunrise', 'sunset'):
-                    hm = day_data.get(key)
-                    if hm:
-                        evt = datetime.strptime(f"{date_str} {hm}", '%Y-%m-%d %H:%M').replace(tzinfo=tzinfo)
-                        if times[0] <= evt <= times[-1]:
-                            event_times.append(evt)
+            for evt in sun_times(date_str) or ():
+                if times[0] <= evt <= times[-1]:
+                    event_times.append(evt)
         event_times.sort()
 
-        # Draw one rectangle per event interval, coloured by the midpoint's night status
-        for i in range(len(event_times) - 1):
-            t_mid = event_times[i] + (event_times[i + 1] - event_times[i]) / 2
-            if _is_night(t_mid):
-                x0 = time_to_x(event_times[i])
-                x1 = time_to_x(event_times[i + 1])
+        # One rectangle per event interval, coloured by the midpoint's night status
+        for start, end in zip(event_times, event_times[1:]):
+            if is_night(start + (end - start) / 2):
+                x0, x1 = time_to_x(start), time_to_x(end)
                 if x0 is not None and x1 is not None:
                     draw.rectangle([(int(x0), bar_top), (int(x1), bar_bottom)], fill=BLACK)
 
-        # Draw bar outline
         draw.rectangle([(graph_left, bar_top), (hour_to_x(len(forecast_data) - 1), bar_bottom)], outline=BLACK, width=1)
 
         # Sunrise/sunset label for today
-        today_str = datetime.fromisoformat(forecast_data[0]['time']).strftime('%Y-%m-%d')
-        day_data = self.sunrise_data.get(today_str)
-        if day_data and day_data.get('sunrise') and day_data.get('sunset'):
-            rise_hm = day_data['sunrise']
-            sett_hm = day_data['sunset']
-            rise = datetime.strptime(rise_hm, '%H:%M')
-            sett = datetime.strptime(sett_hm, '%H:%M')
-            daylight_min = int((sett - rise).total_seconds() / 60)
-            label = f"\u2191{rise_hm}  \u2193{sett_hm}  {daylight_min // 60}h {daylight_min % 60}m"
+        sun = sun_times(times[0].strftime('%Y-%m-%d'))
+        if sun:
+            daylight_min = int((sun[1] - sun[0]).total_seconds() / 60)
+            label = (f"↑{sun[0]:%H:%M}  ↓{sun[1]:%H:%M}  "
+                     f"{daylight_min // 60}h {daylight_min % 60}m")
             draw.text((graph_left, bar_bottom + 2), label, fill=BLACK, font=font_tiny)
+
+    # ---------------------------------------------------------------- screen
 
     def _init_screen(self):
         """Initialize the e-paper display based on screen_type.
@@ -795,30 +700,49 @@ class WeatherDisplay:
             epd = module.EPD()
             epd.init()
             self.epd = epd
-            self._needs_init = True
+            self._asleep = False
             displayLogger.info("Initialized %s (%dx%d)", self.screen_type, epd.width, epd.height)
             return (epd.width, epd.height)
 
         except Exception as e:
             displayLogger.error("Failed to initialize %s: %s", self.screen_type, e, exc_info=True)
             return None
-    
+
+    def _needs_refresh(self, image_hash):
+        """Decide whether the panel has to be redrawn.
+
+        A refresh is skipped when the picture is identical to the one on screen, unless the
+        last refresh is older than FORCE_REFRESH_SECONDS.
+        """
+        if image_hash != self._last_image_hash:
+            return True
+        return time.time() - self._last_refresh >= FORCE_REFRESH_SECONDS
+
     def _display_on_screen(self):
-        """Display the image on the physical e-paper screen using a full refresh."""
+        """Display the image on the physical e-paper screen (full refresh, only when needed)."""
         if self.epd is None:
             return
 
+        image_hash = hashlib.md5(self.image.tobytes()).hexdigest()
+        if not self._needs_refresh(image_hash):
+            displayLogger.info("Image unchanged, e-paper refresh skipped.")
+            return
+
         try:
-            self.epd.init()
+            # The panel only needs re-initialising after it was put to sleep
+            if self._asleep:
+                self.epd.init()
+                self._asleep = False
 
             if 'b' in self.screen_type.lower() and hasattr(self.epd, 'display'):
                 # 3-color displays need separate black and red images
-                black_image = self.image
                 red_image = Image.new('1', (self.image_width, self.image_height), WHITE)
-                self.epd.display(self.epd.getbuffer(black_image), self.epd.getbuffer(red_image))
+                self.epd.display(self.epd.getbuffer(self.image), self.epd.getbuffer(red_image))
             else:
                 self.epd.display(self.epd.getbuffer(self.image))
 
+            self._last_image_hash = image_hash
+            self._last_refresh = time.time()
             displayLogger.info("Image displayed on %s (full refresh)", self.screen_type)
 
         except Exception as e:
@@ -828,54 +752,54 @@ class WeatherDisplay:
         """Put the e-paper display into deep sleep to save power.
 
         Call this when no update is expected for an extended period (e.g. night hours).
-        The display will be re-initialised automatically on the next generate() call.
+        The display is re-initialised automatically on the next refresh.
         """
-        if self.epd is not None and hasattr(self.epd, 'sleep'):
+        if self.epd is not None and not self._asleep and hasattr(self.epd, 'sleep'):
             self.epd.sleep()
+            self._asleep = True
             displayLogger.info("Display sleeping.")
-    
-    def generate(self):
+
+    def generate(self, station_data=None):
         """Generate the complete weather display image
 
         This is the main method to create and save the display
+
+        Args:
+            station_data: Netatmo getstationsdata response; read from data_filename if omitted
         """
         # Initialize screen if specified (no-op after first call)
         screen_size = self._init_screen()
         if screen_size:
             self.image_width, self.image_height = screen_size
 
-        # Create blank image
         self.image = Image.new('1', (self.image_width, self.image_height), WHITE)
 
-        # Draw the weather data
-        self.draw_image()
+        if not self.draw_image(station_data):
+            displayLogger.warning("Nothing to display, image not updated.")
+            return
 
-        # Save the result
         self.image.save(self.image_filename)
         displayLogger.info("Image saved to %s", self.image_filename)
 
-        # Display on physical screen if available
         if self.epd is not None:
             self._display_on_screen()
 
 
 def main():
     """Main function"""
+    utils.setup_logging()
     # Try to read screen_type from config
-    config_file = os.path.join(BASE_DIR, 'config', 'config.json')
+    config_file = os.path.join(utils.CONFIG_DIR, 'config.json')
     screen_type = None
-    
+
     if os.path.isfile(config_file):
         try:
-            config = utils.read_json(config_file)
-            screen_type = config.get('screen_type', None)
+            screen_type = utils.read_json(config_file).get('screen_type', None)
         except Exception as e:
             displayLogger.warning("Could not read screen_type from config: %s", e)
-    
-    display = WeatherDisplay(screen_type=screen_type)
-    display.generate()
+
+    WeatherDisplay(screen_type=screen_type).generate()
 
 
-# main
 if __name__ == '__main__':
     main()

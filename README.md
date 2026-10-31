@@ -174,9 +174,9 @@ After reboot, reattach with `tmux attach -t NETATMO`.
 | `src/netatmo.py` | Main loop — orchestrates data fetching and display updates |
 | `src/display.py` | Renders the display image using PIL |
 | `src/weather.py` | Fetches forecast, air quality, and sunrise/sunset data |
-| `src/reader.py` | Netatmo API client and token management |
 | `src/formatters.py` | Console output formatting |
-| `src/utils.py` | JSON I/O, time formatting, text sizing |
+| `scripts/server.py` | Runs the service and serves `image.bmp` / `weather.json` over HTTP (Docker entrypoint) |
+| `src/utils.py` | Paths, atomic JSON I/O, time formatting, text sizing |
 
 ### Data (created automatically)
 
@@ -196,7 +196,7 @@ Run any service module directly to test it in isolation:
 
 ```bash
 python3 src/weather.py    # fetches forecast, AQI, and sunrise data; prints debug output
-python3 src/reader.py     # fetches station data
+python3 src/formatters.py # prints data/data.json as a console line
 python3 src/display.py    # renders image.bmp from existing data files
 ```
 

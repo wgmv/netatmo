@@ -14,21 +14,14 @@ import requests
 
 import display
 import formatters
-import reader
 import utils
 import weather
 
 netatmoLogger = logging.getLogger(__name__)
-netatmoLogger.setLevel(logging.INFO)
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
-
-# Get the directory where this script is located
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(SCRIPT_DIR)  # Parent directory (project root)
 
 # JSON file names
-CONFIG_DIR = os.path.join(BASE_DIR, "config")
-DATA_DIR = os.path.join(BASE_DIR, "data")
+CONFIG_DIR = utils.CONFIG_DIR
+DATA_DIR = utils.DATA_DIR
 CONFIG_FILENAME = os.path.join(CONFIG_DIR, "config.json")
 TOKEN_FILENAME = os.path.join(CONFIG_DIR, "token.json")
 DATA_FILENAME = os.path.join(DATA_DIR, "data.json")
@@ -50,12 +43,15 @@ TOKEN_DEFAULT = {
     "refresh_token": "xxxx"
 }
 REFRESH_TIME_DEFAULT = 600   # default 10 minutes
-NIGHT_REFRESH_TIME = 1800    # 30 minutes during night hours (22:00–04:00)
+NIGHT_REFRESH_TIME = 1800    # 30 minutes during night hours
+NIGHT_START_HOUR = 22
+NIGHT_END_HOUR = 4
+WEATHER_INTERVAL = 3600      # Fetch weather every 60 minutes
 
 
 def _is_night():
     hour = datetime.now().hour
-    return hour >= 22 or hour < 4
+    return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
 
 
 class NetatmoService:
@@ -65,13 +61,12 @@ class NetatmoService:
         self.config = {}
         self.token = {}
         self.data = {}
-        self.reader = reader.DataReader(DATA_FILENAME)
         self.console_formatter = formatters.NetatmoConsoleFormatter()
         self.weather_service = weather.WeatherServiceMetNo()
         self.air_quality_service = weather.AirQualityServiceWAQI()
         self.sunrise_service = weather.SunriseServiceMetNo()
         self.last_weather_fetch = 0
-        self.weather_interval = 3600  # Fetch weather every 60 minutes
+        self.weather_interval = WEATHER_INTERVAL
         self.weather_display = None   # Created once in run() after config is loaded
 
     def get_new_token_info(self):
@@ -97,7 +92,11 @@ class NetatmoService:
         sys.exit(1)
 
     def refresh_token(self):
-        """NetAtmo API token refresh. Result: self.token and token.json file."""
+        """NetAtmo API token refresh. Result: self.token and token.json file.
+
+        Returns:
+            bool: True if the token was refreshed
+        """
         payload = {
             'grant_type': 'refresh_token',
             'refresh_token': self.token['refresh_token'],
@@ -115,17 +114,24 @@ class NetatmoService:
             self.token = response.json()
             utils.write_json(self.token, TOKEN_FILENAME)
             netatmoLogger.info("refresh_token() OK.")
+            return True
         except requests.exceptions.HTTPError as e:
             netatmoLogger.warning("refresh_token() HTTPError")
             netatmoLogger.warning("%d %s", e.response.status_code, e.response.text)
             netatmoLogger.warning("refresh_token() failed. Need a new access token.")
             self.get_new_token_info()
-            return
         except requests.exceptions.RequestException:
             netatmoLogger.error("refresh_token() RequestException", exc_info=1)
+        return False
 
-    def get_station_data(self):
-        """Gets NetAtmo weather station data. Result: self.data and data.json file."""
+    def get_station_data(self, allow_refresh=True):
+        """Gets NetAtmo weather station data. Result: self.data and data.json file.
+
+        On a 403 the token is refreshed and the request retried once.
+
+        Returns:
+            bool: True if fresh data was fetched
+        """
         params = {
             'access_token': self.token['access_token'],
             'device_id': self.config['device_id']
@@ -134,7 +140,7 @@ class NetatmoService:
             response = requests.post(
                 "https://api.netatmo.com/api/getstationsdata",
                 params=params,
-                timeout=30  # Add timeout
+                timeout=30
             )
             netatmoLogger.debug("%d %s", response.status_code, response.text)
             response.raise_for_status()
@@ -142,41 +148,42 @@ class NetatmoService:
             utils.write_json(self.data, DATA_FILENAME)
 
             self.check_location()
+            return True
 
         except requests.exceptions.HTTPError as e:
             netatmoLogger.warning("get_station_data() HTTPError")
             netatmoLogger.warning("%d %s", e.response.status_code, e.response.text)
-            if e.response.status_code == 403:
+            if e.response.status_code == 403 and allow_refresh:
                 netatmoLogger.info("get_station_data() calling refresh_token()")
-                self.refresh_token()
-                # retry
-                netatmoLogger.info("get_station_data() retrying")
-                self.get_station_data()
+                if self.refresh_token():
+                    netatmoLogger.info("get_station_data() retrying")
+                    return self.get_station_data(allow_refresh=False)
         except requests.exceptions.RequestException:
             netatmoLogger.error("get_station_data() RequestException:", exc_info=1)
+        return False
 
     def check_config(self):
         """Check configuration validity"""
         # check directories
-        if not os.path.isdir(CONFIG_DIR):
-            os.mkdir(CONFIG_DIR)
-        if not os.path.isdir(DATA_DIR):
-            os.mkdir(DATA_DIR)
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        os.makedirs(DATA_DIR, exist_ok=True)
 
         # read config
         if os.path.isfile(CONFIG_FILENAME):
             self.config = utils.read_json(CONFIG_FILENAME)
-            if self.config['client_id'] == 'xxxx' or self.config['client_secret'] == 'xxxx' or self.config['device_id'] == 'xxxx':
+            placeholders = [self.config.get(k, 'xxxx') == 'xxxx' for k in ('client_id', 'client_secret', 'device_id')]
+            if any(placeholders):
                 netatmoLogger.error("main() error:")
                 netatmoLogger.error("Please edit %s and try again.", CONFIG_FILENAME)
                 sys.exit(1)
-            if 'refresh_time' not in self.config or self.config['refresh_time'] < 60:
+            if self.config.get('refresh_time', 0) < 60:
                 self.config['refresh_time'] = REFRESH_TIME_DEFAULT
         else:
             self.config = CONFIG_DEFAULT
             utils.write_json(self.config, CONFIG_FILENAME)
             netatmoLogger.error("main() error:")
             netatmoLogger.error("Please edit %s and try again.", CONFIG_FILENAME)
+            sys.exit(1)
 
         # read last token    
         if os.path.isfile(TOKEN_FILENAME):
@@ -193,10 +200,9 @@ class NetatmoService:
             location[0] = round(location[0], 4)  # Use 4 decimal places for lat/lon to avoid overly precise data
             location[1] = round(location[1], 4)
             altitude = self.data['body']['devices'][0]['place']['altitude']
-            if 'location' not in self.config:  # Fixed typo: was 'location '
+            if 'location' not in self.config:
                 self.config['location'] = {}
             
-            # Break up the long conditional
             location_changed = (
                 'longitude' not in self.config['location']
                 or self.config['location']['longitude'] != location[0]
@@ -224,17 +230,19 @@ class NetatmoService:
         screen_type = self.config.get('screen_type', None)
         self.weather_display = display.WeatherDisplay(screen_type=screen_type)
 
+        # Start from the last stored data so the display still works if the first fetch fails
+        if os.path.isfile(DATA_FILENAME):
+            self.data = utils.read_json(DATA_FILENAME)
+
         try:
             while True:
                 try:
-                    # Fetch station data
                     netatmoLogger.info("Fetching new station data.")
-                    self.get_station_data()
+                    if not self.get_station_data():
+                        netatmoLogger.warning("Station data fetch failed, using last known data.")
 
-                    # Read and display station data
-                    if self.reader.exists():
-                        self.data = self.reader.read()
-                        formatted = self.reader.display(self.console_formatter)
+                    if self.data:
+                        formatted = self.console_formatter.format(self.data)
                         if formatted:
                             netatmoLogger.info(formatted)
 
@@ -242,13 +250,13 @@ class NetatmoService:
                     current_time = time.time()
                     if current_time - self.last_weather_fetch >= self.weather_interval:
                         netatmoLogger.info("Fetching new weather and air quality data.")
-                        self.weather_service.get_weather_data()
-                        self.air_quality_service.get_aqi_data()
-                        self.sunrise_service.get_sunrise_data()
+                        self.weather_service.get_weather_data(self.config)
+                        self.air_quality_service.get_aqi_data(self.config)
+                        self.sunrise_service.get_sunrise_data(self.config)
                         self.last_weather_fetch = current_time
 
-                    # Update display
-                    self.weather_display.generate()
+                    # Update display (station data passed directly, no re-read from disk)
+                    self.weather_display.generate(station_data=self.data)
 
                 except Exception as e:
                     netatmoLogger.error("Error in main loop: %s", e, exc_info=True)
@@ -267,6 +275,11 @@ class NetatmoService:
         except KeyboardInterrupt:
             netatmoLogger.info("Shutting down gracefully...")
 
+
+def main():
+    utils.setup_logging()
+    NetatmoService().run()
+
+
 if __name__ == '__main__':
-    service = NetatmoService()
-    service.run()
+    main()

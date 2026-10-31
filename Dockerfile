@@ -4,21 +4,16 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Copy requirements if present
-COPY requirements.txt ./
-
 # Install dependencies
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY src/netatmo.py ./src/
-COPY src/utils.py ./src/
-COPY src/weather.py ./src/
-COPY src/display.py ./src/
+# Copy application code and assets (font, weather symbols)
+COPY src/ ./src/
 COPY scripts/server.py ./scripts/
+COPY assets/ ./assets/
 
-# copy font
-COPY free-sans.ttf ./
+# config/ and data/ are created at runtime; mount config/ as a volume to keep credentials
+EXPOSE 8000
 
-# Set default command (adjust as needed)
 CMD ["python", "scripts/server.py"]
