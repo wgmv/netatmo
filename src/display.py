@@ -554,7 +554,7 @@ class WeatherDisplay:
         graph_left = 50
         graph_right = width - 50
         graph_top = self.image_height // 2 + 20
-        graph_bottom = self.image_height - 50
+        graph_bottom = self.image_height - 68  # leaves room for time labels, night bar and sun label
         graph_width = graph_right - graph_left
         graph_height = graph_bottom - graph_top
 
