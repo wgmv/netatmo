@@ -228,7 +228,9 @@ class NetatmoService:
         netatmoLogger.info("Starting NetAtmo service with %d seconds refresh time.", self.config['refresh_time'])
 
         screen_type = self.config.get('screen_type', None)
-        self.weather_display = display.WeatherDisplay(screen_type=screen_type)
+        self.weather_display = display.WeatherDisplay(
+            screen_type=screen_type,
+            refresh_abort_seconds=self.config.get('refresh_abort_seconds'))
 
         # Start from the last stored data so the display still works if the first fetch fails
         if os.path.isfile(DATA_FILENAME):

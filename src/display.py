@@ -159,8 +159,13 @@ class WeatherDisplay:
                  symbols_dir=DEFAULT_SYMBOLS_DIR,
                  image_width=DEFAULT_IMAGE_WIDTH,
                  image_height=DEFAULT_IMAGE_HEIGHT,
-                 screen_type=None):
+                 screen_type=None,
+                 refresh_abort_seconds=None):
         """Initialize the WeatherDisplay
+
+        refresh_abort_seconds: EXPERIMENTAL. Cut the panel refresh off this many seconds
+        after it starts (see _push_image). None runs the normal full refresh.
+
 
         Args:
             data_filename: Path to netatmo data JSON file
@@ -182,6 +187,7 @@ class WeatherDisplay:
         self.image_width = image_width
         self.image_height = image_height
         self.screen_type = screen_type
+        self.refresh_abort_seconds = refresh_abort_seconds
         self.epd = None
         self.units = {}  # Will be populated when data is loaded
 
@@ -742,18 +748,39 @@ class WeatherDisplay:
             # in its high-voltage state for hours fades to grey and is damaged permanently.
             self.sleep_display()
 
-    def _push_image(self, image):
-        """Send an image to the panel, waking it first if it is asleep."""
+    def _push_image(self, image, allow_abort=True):
+        """Send an image to the panel, waking it first if it is asleep.
+
+        With refresh_abort_seconds set, the refresh is cut off after that many seconds by
+        resetting the controller. This is a workaround for a worn 3-color panel whose final
+        (red) refresh phase ruins the contrast: the picture is frozen while it still looks
+        good. The driver waits for the refresh in ReadBusy(), so that wait is replaced.
+        """
         if self._asleep:
             self.epd.init()
             self._asleep = False
 
-        if 'b' in self.screen_type.lower():
-            # 3-color displays need separate black and red images
-            red_image = Image.new('1', image.size, WHITE)
-            self.epd.display(self.epd.getbuffer(image), self.epd.getbuffer(red_image))
-        else:
-            self.epd.display(self.epd.getbuffer(image))
+        abort = self.refresh_abort_seconds if allow_abort else None
+        if abort:
+            epd = self.epd
+
+            def abort_refresh(*_args, **_kwargs):
+                time.sleep(abort)
+                epd.reset()
+                displayLogger.info("Refresh cut off after %.1f s", abort)
+
+            epd.ReadBusy = abort_refresh   # instance attribute, shadows the driver method
+
+        try:
+            if 'b' in self.screen_type.lower():
+                # 3-color displays need separate black and red images
+                red_image = Image.new('1', image.size, WHITE)
+                self.epd.display(self.epd.getbuffer(image), self.epd.getbuffer(red_image))
+            else:
+                self.epd.display(self.epd.getbuffer(image))
+        finally:
+            if abort:
+                del self.epd.ReadBusy      # back to the driver's own busy wait
 
     def sleep_display(self):
         """Put the e-paper display into deep sleep.
@@ -784,8 +811,8 @@ class WeatherDisplay:
         try:
             for cycle in range(cycles):
                 displayLogger.info("Cleaning cycle %d/%d", cycle + 1, cycles)
-                self._push_image(Image.new('1', size, BLACK))
-                self._push_image(Image.new('1', size, WHITE))
+                self._push_image(Image.new('1', size, BLACK), allow_abort=False)
+                self._push_image(Image.new('1', size, WHITE), allow_abort=False)
         finally:
             self.sleep_display()
 
@@ -822,14 +849,24 @@ def main():
     # Try to read screen_type from config
     config_file = os.path.join(utils.CONFIG_DIR, 'config.json')
     screen_type = None
+    abort = None
 
     if os.path.isfile(config_file):
         try:
-            screen_type = utils.read_json(config_file).get('screen_type', None)
+            config = utils.read_json(config_file)
+            screen_type = config.get('screen_type', None)
+            abort = config.get('refresh_abort_seconds', None)
         except Exception as e:
             displayLogger.warning("Could not read screen_type from config: %s", e)
 
-    weather_display = WeatherDisplay(screen_type=screen_type)
+    # --abort-after SECONDS overrides the config value (for finding the right timing)
+    if '--abort-after' in sys.argv[1:]:
+        try:
+            abort = float(sys.argv[sys.argv.index('--abort-after') + 1])
+        except (IndexError, ValueError):
+            sys.exit("--abort-after needs a number of seconds, e.g. --abort-after 10")
+
+    weather_display = WeatherDisplay(screen_type=screen_type, refresh_abort_seconds=abort)
     if '--clean' in sys.argv[1:]:
         weather_display.clean_screen()
     else:
