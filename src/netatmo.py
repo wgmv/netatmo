@@ -230,7 +230,7 @@ class NetatmoService:
         screen_type = self.config.get('screen_type', None)
         self.weather_display = display.WeatherDisplay(
             screen_type=screen_type,
-            refresh_abort_seconds=self.config.get('refresh_abort_seconds'))
+            bw_refresh=self.config.get('bw_refresh', False))
 
         # Start from the last stored data so the display still works if the first fetch fails
         if os.path.isfile(DATA_FILENAME):

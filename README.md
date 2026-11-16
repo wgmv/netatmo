@@ -114,6 +114,7 @@ cd netatmo
 | `device_id` | MAC address of your indoor module |
 | `refresh_time` | Seconds between station data updates (min 60, default 600) |
 | `screen_type` | Waveshare model name, or `null` for file-only mode |
+| `bw_refresh` | Optional, `true` or `false` (default). Only for `epd5in83b_V2`: drive the black/white/red panel with the fast black/white refresh. Use it when the normal refresh leaves a dark, low-contrast picture |
 | `location` | Used for forecast and sunrise API calls — updated automatically from station data |
 | `waqi_token` | Optional. Get a free token at [aqicn.org/data-platform/token](https://aqicn.org/data-platform/token/) |
 

@@ -89,6 +89,10 @@ FORECAST_HOURS = 24
 # unchanged, but still redraw now and then to clear ghosting.
 FORCE_REFRESH_SECONDS = 6 * 60 * 60
 
+# Black/white/red panels that can also be driven by the black/white driver of the same
+# size (option bw_refresh): 3-color screen_type -> black/white driver module.
+BW_DRIVER_FOR = {'epd5in83b_V2': 'epd5in83_V2'}
+
 TREND_SYMBOLS = {
     'up': '↗',     # ↗
     'down': '↘',   # ↘
@@ -160,11 +164,11 @@ class WeatherDisplay:
                  image_width=DEFAULT_IMAGE_WIDTH,
                  image_height=DEFAULT_IMAGE_HEIGHT,
                  screen_type=None,
-                 refresh_abort_seconds=None):
+                 bw_refresh=False):
         """Initialize the WeatherDisplay
 
-        refresh_abort_seconds: EXPERIMENTAL. Cut the panel refresh off this many seconds
-        after it starts (see _push_image). None runs the normal full refresh.
+        bw_refresh: drive a black/white/red panel with the fast black/white refresh
+        (see _push_image). Only supported for 'epd5in83b_V2'.
 
 
         Args:
@@ -187,7 +191,9 @@ class WeatherDisplay:
         self.image_width = image_width
         self.image_height = image_height
         self.screen_type = screen_type
-        self.refresh_abort_seconds = refresh_abort_seconds
+        self.bw_refresh = bool(bw_refresh) and screen_type in BW_DRIVER_FOR
+        if bw_refresh and not self.bw_refresh:
+            displayLogger.warning("bw_refresh is not supported for screen_type %s, ignored.", screen_type)
         self.epd = None
         self.units = {}  # Will be populated when data is loaded
 
@@ -702,12 +708,14 @@ class WeatherDisplay:
                 sys.path.append(libdir)
 
             # Import the module dynamically based on screen_type
-            module = importlib.import_module(f'waveshare_epd.{self.screen_type}')
+            driver = BW_DRIVER_FOR[self.screen_type] if self.bw_refresh else self.screen_type
+            module = importlib.import_module(f'waveshare_epd.{driver}')
             epd = module.EPD()
             epd.init()
             self.epd = epd
             self._asleep = False
-            displayLogger.info("Initialized %s (%dx%d)", self.screen_type, epd.width, epd.height)
+            displayLogger.info("Initialized %s with driver %s (%dx%d)",
+                               self.screen_type, driver, epd.width, epd.height)
             return (epd.width, epd.height)
 
         except Exception as e:
@@ -748,39 +756,45 @@ class WeatherDisplay:
             # in its high-voltage state for hours fades to grey and is damaged permanently.
             self.sleep_display()
 
-    def _push_image(self, image, allow_abort=True):
-        """Send an image to the panel, waking it first if it is asleep.
-
-        With refresh_abort_seconds set, the refresh is cut off after that many seconds by
-        resetting the controller. This is a workaround for a worn 3-color panel whose final
-        (red) refresh phase ruins the contrast: the picture is frozen while it still looks
-        good. The driver waits for the refresh in ReadBusy(), so that wait is replaced.
-        """
+    def _push_image(self, image):
+        """Send an image to the panel, waking it first if it is asleep."""
         if self._asleep:
             self.epd.init()
             self._asleep = False
 
-        abort = self.refresh_abort_seconds if allow_abort else None
-        if abort:
-            epd = self.epd
+        if self.bw_refresh:
+            self._push_image_bw(image)
+        elif 'b' in self.screen_type.lower():
+            # 3-color displays need separate black and red images
+            red_image = Image.new('1', image.size, WHITE)
+            self.epd.display(self.epd.getbuffer(image), self.epd.getbuffer(red_image))
+        else:
+            self.epd.display(self.epd.getbuffer(image))
 
-            def abort_refresh(*_args, **_kwargs):
-                time.sleep(abort)
-                epd.reset()
-                displayLogger.info("Refresh cut off after %.1f s", abort)
+    def _push_image_bw(self, image):
+        """Show an image on a 3-color panel using the black/white refresh.
 
-            epd.ReadBusy = abort_refresh   # instance attribute, shadows the driver method
+        This skips the slow red phase of the 3-color refresh (which also ruins the contrast
+        on a worn panel). The black/white driver's own display() gives a wrong picture on
+        this panel, so the data is sent here: "previous picture" memory all zero, and the
+        new picture with bit 1 = white, the opposite of what that driver sends.
+        """
+        epd = self.epd
+        data = image.convert('1').tobytes()   # PIL packs bit 1 = white
 
-        try:
-            if 'b' in self.screen_type.lower():
-                # 3-color displays need separate black and red images
-                red_image = Image.new('1', image.size, WHITE)
-                self.epd.display(self.epd.getbuffer(image), self.epd.getbuffer(red_image))
+        def send_block(command, block):
+            epd.send_command(command)
+            if hasattr(epd, 'send_data2'):
+                epd.send_data2(block)
             else:
-                self.epd.display(self.epd.getbuffer(image))
-        finally:
-            if abort:
-                del self.epd.ReadBusy      # back to the driver's own busy wait
+                for value in block:
+                    epd.send_data(value)
+
+        send_block(0x10, bytes(len(data)))   # previous picture
+        send_block(0x13, data)               # new picture
+        epd.send_command(0x12)               # refresh
+        time.sleep(0.1)
+        epd.ReadBusy()
 
     def sleep_display(self):
         """Put the e-paper display into deep sleep.
@@ -811,8 +825,8 @@ class WeatherDisplay:
         try:
             for cycle in range(cycles):
                 displayLogger.info("Cleaning cycle %d/%d", cycle + 1, cycles)
-                self._push_image(Image.new('1', size, BLACK), allow_abort=False)
-                self._push_image(Image.new('1', size, WHITE), allow_abort=False)
+                self._push_image(Image.new('1', size, BLACK))
+                self._push_image(Image.new('1', size, WHITE))
         finally:
             self.sleep_display()
 
@@ -849,24 +863,23 @@ def main():
     # Try to read screen_type from config
     config_file = os.path.join(utils.CONFIG_DIR, 'config.json')
     screen_type = None
-    abort = None
+    bw_refresh = False
 
     if os.path.isfile(config_file):
         try:
             config = utils.read_json(config_file)
             screen_type = config.get('screen_type', None)
-            abort = config.get('refresh_abort_seconds', None)
+            bw_refresh = config.get('bw_refresh', False)
         except Exception as e:
             displayLogger.warning("Could not read screen_type from config: %s", e)
 
-    # --abort-after SECONDS overrides the config value (for finding the right timing)
-    if '--abort-after' in sys.argv[1:]:
-        try:
-            abort = float(sys.argv[sys.argv.index('--abort-after') + 1])
-        except (IndexError, ValueError):
-            sys.exit("--abort-after needs a number of seconds, e.g. --abort-after 10")
+    # --bw / --color override the config value for a single run
+    if '--bw' in sys.argv[1:]:
+        bw_refresh = True
+    if '--color' in sys.argv[1:]:
+        bw_refresh = False
 
-    weather_display = WeatherDisplay(screen_type=screen_type, refresh_abort_seconds=abort)
+    weather_display = WeatherDisplay(screen_type=screen_type, bw_refresh=bw_refresh)
     if '--clean' in sys.argv[1:]:
         weather_display.clean_screen()
     else:
