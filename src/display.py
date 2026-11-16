@@ -44,7 +44,6 @@ display.generate(station_data=data)
 # - 'epd5in83b_V2': Waveshare 5.83" e-paper HAT V2 (B/W/R)
 """
 
-import argparse
 import hashlib
 import importlib
 import logging
@@ -778,7 +777,8 @@ class WeatherDisplay:
         """
         size = self._init_screen()
         if size is None:
-            displayLogger.error("No screen configured, nothing to clean.")
+            displayLogger.error("Screen not available (not configured, or initialisation failed - "
+                                "is the netatmo service still running?), nothing to clean.")
             return
 
         try:
@@ -819,30 +819,18 @@ class WeatherDisplay:
 def main():
     """Main function"""
     utils.setup_logging()
-    parser = argparse.ArgumentParser(description="Render the weather display once, or clean the panel.")
-    parser.add_argument('--clean', action='store_true',
-                        help="flush the panel with black/white refreshes instead of drawing")
-    parser.add_argument('--screen', metavar='TYPE',
-                        help="Waveshare model, e.g. epd2in7 (overrides screen_type in config.json)")
-    args = parser.parse_args()
-
-    # Screen type: command line first, then config
+    # Try to read screen_type from config
     config_file = os.path.join(utils.CONFIG_DIR, 'config.json')
-    screen_type = args.screen
+    screen_type = None
 
-    if screen_type is None:
-        if os.path.isfile(config_file):
-            try:
-                screen_type = utils.read_json(config_file).get('screen_type', None)
-            except Exception as e:
-                displayLogger.warning("Could not read screen_type from config: %s", e)
-        else:
-            displayLogger.warning("Config file not found: %s", config_file)
-        if screen_type is None:
-            displayLogger.warning("No screen_type set in %s (use --screen TYPE to override)", config_file)
+    if os.path.isfile(config_file):
+        try:
+            screen_type = utils.read_json(config_file).get('screen_type', None)
+        except Exception as e:
+            displayLogger.warning("Could not read screen_type from config: %s", e)
 
     weather_display = WeatherDisplay(screen_type=screen_type)
-    if args.clean:
+    if '--clean' in sys.argv[1:]:
         weather_display.clean_screen()
     else:
         weather_display.generate()
