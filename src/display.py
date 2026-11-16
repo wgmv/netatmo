@@ -729,18 +729,7 @@ class WeatherDisplay:
             return
 
         try:
-            # The panel only needs re-initialising after it was put to sleep
-            if self._asleep:
-                self.epd.init()
-                self._asleep = False
-
-            if 'b' in self.screen_type.lower() and hasattr(self.epd, 'display'):
-                # 3-color displays need separate black and red images
-                red_image = Image.new('1', (self.image_width, self.image_height), WHITE)
-                self.epd.display(self.epd.getbuffer(self.image), self.epd.getbuffer(red_image))
-            else:
-                self.epd.display(self.epd.getbuffer(self.image))
-
+            self._push_image(self.image)
             self._last_image_hash = image_hash
             self._last_refresh = time.time()
             displayLogger.info("Image displayed on %s (full refresh)", self.screen_type)
@@ -748,16 +737,56 @@ class WeatherDisplay:
         except Exception as e:
             displayLogger.error("Failed to display on %s: %s", self.screen_type, e, exc_info=True)
 
-    def sleep_display(self):
-        """Put the e-paper display into deep sleep to save power.
+        finally:
+            # Never leave the panel powered between refreshes: an e-paper panel that stays
+            # in its high-voltage state for hours fades to grey and is damaged permanently.
+            self.sleep_display()
 
-        Call this when no update is expected for an extended period (e.g. night hours).
-        The display is re-initialised automatically on the next refresh.
+    def _push_image(self, image):
+        """Send an image to the panel, waking it first if it is asleep."""
+        if self._asleep:
+            self.epd.init()
+            self._asleep = False
+
+        if 'b' in self.screen_type.lower():
+            # 3-color displays need separate black and red images
+            red_image = Image.new('1', image.size, WHITE)
+            self.epd.display(self.epd.getbuffer(image), self.epd.getbuffer(red_image))
+        else:
+            self.epd.display(self.epd.getbuffer(image))
+
+    def sleep_display(self):
+        """Put the e-paper display into deep sleep.
+
+        Called after every refresh. The display is re-initialised automatically on the
+        next refresh.
         """
         if self.epd is not None and not self._asleep and hasattr(self.epd, 'sleep'):
-            self.epd.sleep()
-            self._asleep = True
-            displayLogger.info("Display sleeping.")
+            try:
+                self.epd.sleep()
+                self._asleep = True
+                displayLogger.info("Display sleeping.")
+            except Exception as e:
+                displayLogger.error("Failed to put %s to sleep: %s", self.screen_type, e, exc_info=True)
+
+    def clean_screen(self, cycles=4):
+        """Flush the panel with alternating black and white full refreshes.
+
+        This can restore contrast on a panel that has turned grey/dark. Stop the netatmo
+        service before running it, both cannot drive the display at the same time.
+        """
+        size = self._init_screen()
+        if size is None:
+            displayLogger.error("No screen configured, nothing to clean.")
+            return
+
+        try:
+            for cycle in range(cycles):
+                displayLogger.info("Cleaning cycle %d/%d", cycle + 1, cycles)
+                self._push_image(Image.new('1', size, BLACK))
+                self._push_image(Image.new('1', size, WHITE))
+        finally:
+            self.sleep_display()
 
     def generate(self, station_data=None):
         """Generate the complete weather display image
@@ -776,6 +805,7 @@ class WeatherDisplay:
 
         if not self.draw_image(station_data):
             displayLogger.warning("Nothing to display, image not updated.")
+            self.sleep_display()
             return
 
         self.image.save(self.image_filename)
@@ -798,7 +828,11 @@ def main():
         except Exception as e:
             displayLogger.warning("Could not read screen_type from config: %s", e)
 
-    WeatherDisplay(screen_type=screen_type).generate()
+    weather_display = WeatherDisplay(screen_type=screen_type)
+    if '--clean' in sys.argv[1:]:
+        weather_display.clean_screen()
+    else:
+        weather_display.generate()
 
 
 if __name__ == '__main__':

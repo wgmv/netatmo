@@ -261,9 +261,9 @@ class NetatmoService:
                 except Exception as e:
                     netatmoLogger.error("Error in main loop: %s", e, exc_info=True)
 
-                # During night hours sleep the display and wait longer between refreshes
+                # During night hours wait longer between refreshes
+                # (the display puts itself to sleep after every refresh)
                 if _is_night():
-                    self.weather_display.sleep_display()
                     sleep_time = max(self.config['refresh_time'], NIGHT_REFRESH_TIME)
                     netatmoLogger.info("Night mode: sleeping for %d seconds...", sleep_time)
                 else:
