@@ -44,6 +44,7 @@ display.generate(station_data=data)
 # - 'epd5in83b_V2': Waveshare 5.83" e-paper HAT V2 (B/W/R)
 """
 
+import argparse
 import hashlib
 import importlib
 import logging
@@ -818,18 +819,30 @@ class WeatherDisplay:
 def main():
     """Main function"""
     utils.setup_logging()
-    # Try to read screen_type from config
-    config_file = os.path.join(utils.CONFIG_DIR, 'config.json')
-    screen_type = None
+    parser = argparse.ArgumentParser(description="Render the weather display once, or clean the panel.")
+    parser.add_argument('--clean', action='store_true',
+                        help="flush the panel with black/white refreshes instead of drawing")
+    parser.add_argument('--screen', metavar='TYPE',
+                        help="Waveshare model, e.g. epd2in7 (overrides screen_type in config.json)")
+    args = parser.parse_args()
 
-    if os.path.isfile(config_file):
-        try:
-            screen_type = utils.read_json(config_file).get('screen_type', None)
-        except Exception as e:
-            displayLogger.warning("Could not read screen_type from config: %s", e)
+    # Screen type: command line first, then config
+    config_file = os.path.join(utils.CONFIG_DIR, 'config.json')
+    screen_type = args.screen
+
+    if screen_type is None:
+        if os.path.isfile(config_file):
+            try:
+                screen_type = utils.read_json(config_file).get('screen_type', None)
+            except Exception as e:
+                displayLogger.warning("Could not read screen_type from config: %s", e)
+        else:
+            displayLogger.warning("Config file not found: %s", config_file)
+        if screen_type is None:
+            displayLogger.warning("No screen_type set in %s (use --screen TYPE to override)", config_file)
 
     weather_display = WeatherDisplay(screen_type=screen_type)
-    if '--clean' in sys.argv[1:]:
+    if args.clean:
         weather_display.clean_screen()
     else:
         weather_display.generate()
